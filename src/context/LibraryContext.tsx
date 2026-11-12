@@ -18,7 +18,17 @@ import {
   INITIAL_NOTIFICATIONS,
   INSTITUTIONAL_PENALTY_RULES,
 } from '../data/mockData';
-import { authenticateWithCredentials } from '../services/authService';
+import {
+  authenticateWithCredentials,
+  checkServerSession,
+  logoutSession,
+} from '../services/authService';
+import {
+  getSystemToday,
+  addDays,
+  calculateDaysOverdue,
+  determineSeverity,
+} from '../utils/dateUtils';
 
 interface ScanBorrowState {
   scannedBook: Book | null;
@@ -37,6 +47,8 @@ interface ScanReturnState {
 
 export interface LibraryContextType {
   currentUser: User | null;
+  authMode: 'server' | 'local_demo';
+  systemDate: string; // Date réelle du système (YYYY-MM-DD)
   login: (email: string, plainPassword: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
   books: Book[];
@@ -45,50 +57,53 @@ export interface LibraryContextType {
   loans: Loan[];
   notifications: Notification[];
   penaltyRule: PenaltyRule;
-  
-  // Indicateurs calculés automatiquement pour le Gérant de bibliothèque
+
+  // Indicateurs calculés automatiquement à partir des données réelles
   totalBooksCount: number; // Nombre total de titres
   totalCopiesCount: number; // Nombre total d'exemplaires physiques
-  availableCopiesCount: number; // Nombre d'exemplaires disponibles
-  borrowedCopiesCount: number; // Nombre d'exemplaires empruntés
+  availableCopiesCount: number; // Nombre d'exemplaires disponibles en rayon
+  reservedCopiesCount: number; // Nombre d'exemplaires réservés (demandes acceptées)
+  borrowedCopiesCount: number; // Nombre d'exemplaires empruntés (en circulation)
+  unavailableCopiesCount: number; // Nombre d'exemplaires indisponibles (en réparation / endommagés)
   overdueLoansCount: number; // Nombre d'emprunts en retard
   pendingRequestsCount: number; // Nombre de demandes d'emprunt en attente
-  returnsToProcessCount: number; // Nombre de retours à traiter
-  
+  returnsToProcessCount: number; // Nombre de retours à traiter (aujourd'hui ou en retard)
+
   // Listes filtrées
   overdueLoans: Loan[];
   loansDueToday: Loan[];
   pendingRequests: Loan[];
   acceptedRequestsWaitingHandover: Loan[];
   activeLoans: Loan[];
-  
-  // Gestion des livres (Gérant)
-  addBook: (newBook: Omit<Book, 'id' | 'availableCopies' | 'borrowedCopies'>) => void;
+
+  // Gestion des livres et du stock (Gérant de bibliothèque)
+  addBook: (newBook: Omit<Book, 'id' | 'availableCopies' | 'reservedCopies' | 'borrowedCopies' | 'unavailableCopies'>) => void;
   updateBook: (id: string, updatedFields: Partial<Book>) => void;
   deleteOrArchiveBook: (id: string) => void;
   addCategory: (categoryName: string) => void;
-  
+  repairDamagedBook: (bookId: string) => void; // Remettre un exemplaire réparé en rayon disponible
+
   // Gestion des demandes d'emprunt (Gérant)
-  acceptLoanRequest: (loanId: string) => void;
-  refuseLoanRequest: (loanId: string, reason?: string) => void;
-  confirmPhysicalHandover: (loanId: string) => void; // Remise physique du livre
-  
+  acceptLoanRequest: (loanId: string) => { success: boolean; error?: string };
+  refuseLoanRequest: (loanId: string, reason?: string) => { success: boolean; error?: string };
+  confirmPhysicalHandover: (loanId: string) => { success: boolean; error?: string }; // Remise physique du livre
+
   // Demande d'emprunt (Étudiant)
   requestBookLoan: (bookId: string) => { success: boolean; error?: string };
-  
+
   // Gestion des retours (Gérant)
   processPhysicalReturn: (
     loanId: string,
     condition: BookCondition,
     notes?: string
   ) => { success: boolean; error?: string };
-  
+
   // Signalement à l'administrateur
   reportOverdueToAdmin: (loanId: string, reason: string) => void;
-  
+
   // Notifications étudiant
   markNotificationAsRead: (notificationId: string) => void;
-  
+
   // Scanner QR code (Gérant)
   scanBorrowState: ScanBorrowState;
   scanReturnState: ScanReturnState;
@@ -99,7 +114,7 @@ export interface LibraryContextType {
   processReturnBookScan: (qrCode: string) => boolean;
   processReturnStudentScan: (qrCode: string) => boolean;
   resetReturnScan: () => void;
-  
+
   // Fiches sélectionnées
   selectedBookForDetail: Book | null;
   setSelectedBookForDetail: (book: Book | null) => void;
@@ -107,7 +122,7 @@ export interface LibraryContextType {
   setSelectedOverdueLoan: (loan: Loan | null) => void;
   selectedStudentProfile: Student | null;
   setSelectedStudentProfile: (student: Student | null) => void;
-  
+
   // Logs & notifications automatiques
   emailLogs: EmailLog[];
   automaticEmailNotification: string | null;
@@ -116,17 +131,20 @@ export interface LibraryContextType {
 
 const LibraryContext = createContext<LibraryContextType | undefined>(undefined);
 
-const STORAGE_KEY_BOOKS = 'biblioest_books_v4';
-const STORAGE_KEY_CATEGORIES = 'biblioest_categories_v4';
-const STORAGE_KEY_LOANS = 'biblioest_loans_v4';
-const STORAGE_KEY_STUDENTS = 'biblioest_students_v4';
-const STORAGE_KEY_NOTIFS = 'biblioest_notifs_v4';
-const STORAGE_KEY_USER = 'biblioest_authenticated_user_v4';
-
-export const TODAY_DATE = '2026-11-12';
+const STORAGE_KEY_BOOKS = 'biblioest_books_v5';
+const STORAGE_KEY_CATEGORIES = 'biblioest_categories_v5';
+const STORAGE_KEY_LOANS = 'biblioest_loans_v5';
+const STORAGE_KEY_STUDENTS = 'biblioest_students_v5';
+const STORAGE_KEY_NOTIFS = 'biblioest_notifs_v5';
+const STORAGE_KEY_USER = 'biblioest_user_session_v5';
 
 export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Session persistée : l'utilisateur reste connecté après actualisation
+  // Date réelle du système dynamique
+  const systemDate = getSystemToday();
+
+  const [authMode, setAuthMode] = useState<'server' | 'local_demo'>('server');
+
+  // Session utilisateur
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_USER);
     if (saved) {
@@ -141,6 +159,16 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
     return null;
   });
+
+  // Vérification de session auprès du serveur au montage
+  useEffect(() => {
+    checkServerSession().then((serverUser) => {
+      if (serverUser) {
+        setCurrentUser(serverUser);
+        setAuthMode('server');
+      }
+    }).catch(() => {});
+  }, []);
 
   const [categories, setCategories] = useState<string[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_CATEGORIES);
@@ -237,7 +265,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [currentUser]);
 
-  // Authentification sécurisée par identifiant et mot de passe (hashé cryptographiquement)
+  // Authentification
   const login = async (
     email: string,
     plainPassword: string
@@ -249,11 +277,13 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     setCurrentUser(result.user);
+    setAuthMode(result.authMode || 'server');
     return { success: true };
   };
 
-  // Déconnexion qui ferme proprement la session
+  // Déconnexion qui ferme proprement la session côté serveur et client
   const logout = () => {
+    logoutSession().catch(() => {});
     setCurrentUser(null);
     localStorage.removeItem(STORAGE_KEY_USER);
     setSelectedBookForDetail(null);
@@ -262,26 +292,47 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     hasAutoSentEmailsRef.current = false;
   };
 
-  // RECALCUL STRICT ET AUTOMATIQUE DE LA COHÉRENCE DU STOCK
-  // totalCopies = availableCopies + borrowedCopies
-  // Seuls les emprunts 'active' occupent physiquement un exemplaire emprunté
+  // =========================================================================
+  // GARANTIE STRICTE DE LA COHÉRENCE DU STOCK (RECALCUL AUTOMATIQUE)
+  // totalCopies = availableCopies + reservedCopies + borrowedCopies + unavailableCopies
+  // - availableCopies : en rayon prêt à être réservé ou emprunté
+  // - reservedCopies  : bloqué par une demande acceptée en attente de retrait
+  // - borrowedCopies  : en possession physique de l'étudiant
+  // - unavailableCopies: exemplaire endommagé en réparation
+  // =========================================================================
   useEffect(() => {
     setBooks((prevBooks) => {
       let hasChanges = false;
       const updated = prevBooks.map((book) => {
-        const activeCount = loans.filter(
+        // 1. Emprunts actifs
+        const borrowedCount = loans.filter(
           (l) => l.bookId === book.id && l.status === 'active'
         ).length;
 
-        const calculatedAvailable = Math.max(0, book.totalCopies - activeCount);
+        // 2. Demandes acceptées qui réservent un exemplaire
+        const reservedCount = loans.filter(
+          (l) => l.bookId === book.id && l.status === 'accepted'
+        ).length;
+
+        // 3. Exemplaires indisponibles (endommagés)
+        const unavailableCount = book.unavailableCopies || 0;
+
+        // 4. Exemplaires disponibles restants
+        const calculatedAvailable = Math.max(
+          0,
+          book.totalCopies - borrowedCount - reservedCount - unavailableCount
+        );
+
         if (
-          book.borrowedCopies !== activeCount ||
+          book.borrowedCopies !== borrowedCount ||
+          book.reservedCopies !== reservedCount ||
           book.availableCopies !== calculatedAvailable
         ) {
           hasChanges = true;
           return {
             ...book,
-            borrowedCopies: activeCount,
+            borrowedCopies: borrowedCount,
+            reservedCopies: reservedCount,
             availableCopies: calculatedAvailable,
           };
         }
@@ -292,53 +343,61 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   }, [loans]);
 
+  // =========================================================================
   // CALCULS STATISTIQUES AUTOMATIQUES POUR LE GÉRANT DE BIBLIOTHÈQUE
+  // Tous calculés dynamiquement à partir des données réelles (AUCUN CHIFFRE EN DUR)
+  // =========================================================================
   const activeBooks = books.filter((b) => !b.isArchived);
   const totalBooksCount = activeBooks.length;
   const totalCopiesCount = activeBooks.reduce((acc, b) => acc + b.totalCopies, 0);
   const availableCopiesCount = activeBooks.reduce((acc, b) => acc + b.availableCopies, 0);
+  const reservedCopiesCount = activeBooks.reduce((acc, b) => acc + (b.reservedCopies || 0), 0);
   const borrowedCopiesCount = activeBooks.reduce((acc, b) => acc + b.borrowedCopies, 0);
+  const unavailableCopiesCount = activeBooks.reduce((acc, b) => acc + (b.unavailableCopies || 0), 0);
 
   // 1. Demandes d'emprunt en attente
   const pendingRequests = loans.filter((l) => l.status === 'pending');
   const pendingRequestsCount = pendingRequests.length;
 
-  // 2. Demandes acceptées en attente de remise physique
+  // 2. Demandes acceptées en attente de remise physique (réservation active)
   const acceptedRequestsWaitingHandover = loans.filter((l) => l.status === 'accepted');
 
   // 3. Emprunts actifs
   const activeLoans = loans.filter((l) => l.status === 'active');
 
-  // 4. Emprunts en retard avec pénalités
+  // 4. Emprunts en retard calculés selon la date réelle du système
   const overdueLoans: Loan[] = loans
-    .filter((l) => l.status === 'active' && l.daysOverdue > 0)
+    .filter(
+      (l) =>
+        l.status === 'active' && calculateDaysOverdue(l.dueDate, systemDate) > 0
+    )
     .map((l) => {
-      let severity: OverdueSeverity = 'yellow';
-      if (l.daysOverdue > 7) {
-        severity = 'red';
-      } else if (l.daysOverdue >= 4) {
-        severity = 'orange';
-      } else {
-        severity = 'yellow';
-      }
-      const penaltyFeeMad = l.daysOverdue * penaltyRule.feePerDayMad;
-      return { ...l, severity, penaltyFeeMad };
+      const realDaysOverdue = calculateDaysOverdue(l.dueDate, systemDate);
+      const severity = determineSeverity(realDaysOverdue);
+      const penaltyFeeMad = realDaysOverdue * penaltyRule.feePerDayMad;
+      const updated: Loan = {
+        ...l,
+        daysOverdue: realDaysOverdue,
+        severity,
+        penaltyFeeMad,
+      };
+      return updated;
     })
-    .sort((a, b) => b.daysOverdue - a.daysOverdue);
+    .sort((a, b) => (b.daysOverdue ?? 0) - (a.daysOverdue ?? 0));
 
   const overdueLoansCount = overdueLoans.length;
 
-  // 5. Livres qui doivent être retournés aujourd'hui
+  // 5. Livres qui doivent être retournés AUJOURD'HUI (date réelle)
   const loansDueToday = loans.filter(
-    (l) => l.status === 'active' && l.dueDate === TODAY_DATE
+    (l) => l.status === 'active' && l.dueDate === systemDate
   );
 
-  // 6. Retours à traiter (livres échus aujourd'hui ou en retard)
+  // 6. Retours à traiter (échéance aujourd'hui ou en retard)
   const returnsToProcessCount = loans.filter(
-    (l) => l.status === 'active' && (l.dueDate === TODAY_DATE || l.daysOverdue > 0)
+    (l) => l.status === 'active' && (l.dueDate === systemDate || calculateDaysOverdue(l.dueDate, systemDate) > 0)
   ).length;
 
-  // Envoi automatique de mail sans clic pour le Gérant dès la détection de retards
+  // Notification automatique de rappel par e-mail sans clic
   useEffect(() => {
     if (
       currentUser?.role === 'manager' &&
@@ -352,7 +411,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const recipients = Array.from(recipientSet);
 
       const autoLog: EmailLog = {
-        id: `AUTO-LOG-${Date.now()}`,
+        id: `EMAIL-AUTO-${Date.now()}`,
         sentAt: new Date().toLocaleTimeString('fr-FR', {
           hour: '2-digit',
           minute: '2-digit',
@@ -361,11 +420,14 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         recipientCount: recipients.length,
         recipients,
         subject: "biblioEST : Rappel officiel de retard de restitution d'ouvrage",
+        status: 'simulated_queued',
+        provider: 'Simulation Queue (Service SMTP / Resend externe non connecté)',
+        note: 'Généré automatiquement sans clic dès détection des retards.',
       };
 
       setEmailLogs((prev) => [autoLog, ...prev]);
       setAutomaticEmailNotification(
-        `Système automatique : ${recipients.length} e-mail(s) de relance généré(s) sans clic pour les retards en cours.`
+        `Système automatique : ${recipients.length} e-mail(s) de relance mis en file sans clic pour les retards en cours.`
       );
     }
   }, [currentUser, overdueLoans]);
@@ -377,13 +439,18 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // =========================================================================
   // GESTION DES LIVRES (Gérant de bibliothèque)
   // =========================================================================
-  const addBook = (newBookData: Omit<Book, 'id' | 'availableCopies' | 'borrowedCopies'>) => {
+  const addBook = (
+    newBookData: Omit<Book, 'id' | 'availableCopies' | 'reservedCopies' | 'borrowedCopies' | 'unavailableCopies'>
+  ) => {
     const newId = `EST-LIV-${Date.now().toString().slice(-4)}`;
     const newBook: Book = {
       ...newBookData,
       id: newId,
       availableCopies: newBookData.totalCopies,
+      reservedCopies: 0,
       borrowedCopies: 0,
+      unavailableCopies: 0,
+      lostCopies: 0,
       isArchived: false,
     };
     setBooks((prev) => [newBook, ...prev]);
@@ -395,14 +462,35 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         if (b.id !== id) return b;
         const total = updatedFields.totalCopies !== undefined ? updatedFields.totalCopies : b.totalCopies;
         const activeLoansForBook = loans.filter((l) => l.bookId === id && l.status === 'active').length;
-        const available = Math.max(0, total - activeLoansForBook);
+        const reservedLoansForBook = loans.filter((l) => l.bookId === id && l.status === 'accepted').length;
+        const unavailable = updatedFields.unavailableCopies !== undefined ? updatedFields.unavailableCopies : (b.unavailableCopies || 0);
+
+        const available = Math.max(0, total - activeLoansForBook - reservedLoansForBook - unavailable);
 
         return {
           ...b,
           ...updatedFields,
           totalCopies: total,
           borrowedCopies: activeLoansForBook,
+          reservedCopies: reservedLoansForBook,
+          unavailableCopies: unavailable,
           availableCopies: available,
+        };
+      })
+    );
+  };
+
+  const repairDamagedBook = (bookId: string) => {
+    setBooks((prev) =>
+      prev.map((b) => {
+        if (b.id !== bookId) return b;
+        const curUnavailable = b.unavailableCopies || 0;
+        if (curUnavailable <= 0) return b;
+
+        return {
+          ...b,
+          unavailableCopies: curUnavailable - 1,
+          availableCopies: b.availableCopies + 1,
         };
       })
     );
@@ -424,7 +512,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // =========================================================================
   // GESTION DES DEMANDES D'EMPRUNT
   // =========================================================================
-  // Création par l'étudiant
+  // 1. Demande par l'étudiant
   const requestBookLoan = (bookId: string): { success: boolean; error?: string } => {
     if (!currentUser || currentUser.role !== 'student') {
       return { success: false, error: 'Seul un étudiant connecté peut demander un emprunt.' };
@@ -436,10 +524,10 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (targetBook.availableCopies <= 0) {
-      return { success: false, error: "Aucun exemplaire n'est actuellement disponible en rayon." };
+      return { success: false, error: "Aucun exemplaire n'est actuellement disponible en rayon (tous empruntés ou réservés)." };
     }
 
-    // Vérifier limite stricte de 3 emprunts actifs ou acceptés
+    // Vérifier limite stricte de 3 emprunts ou demandes
     const studentExistingLoans = loans.filter(
       (l) => l.studentId === currentUser.id && (l.status === 'active' || l.status === 'accepted' || l.status === 'pending')
     );
@@ -460,8 +548,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     const newLoanId = `DEM-EST-${Date.now().toString().slice(-4)}`;
-    const returnDueDate = new Date();
-    returnDueDate.setDate(returnDueDate.getDate() + 14);
+    const returnDueDate = addDays(systemDate, 14);
 
     const newLoan: Loan = {
       id: newLoanId,
@@ -473,21 +560,21 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       studentName: currentUser.name,
       studentEmail: currentUser.email,
       studentCardId: currentUser.studentCardId || 'CARD-EST',
-      requestDate: TODAY_DATE,
-      dueDate: returnDueDate.toISOString().split('T')[0],
+      requestDate: systemDate,
+      dueDate: returnDueDate,
       status: 'pending',
       daysOverdue: 0,
     };
 
     setLoans((prev) => [newLoan, ...prev]);
 
-    // Ajouter notification pour l'étudiant
+    // Notification étudiant
     const newNotif: Notification = {
       id: `NOTIF-${Date.now()}`,
       userId: currentUser.id,
       title: 'Demande d’emprunt enregistrée',
       message: `Votre demande pour « ${targetBook.title} » a été transmise au Gérant de bibliothèque.`,
-      createdAt: TODAY_DATE + ' ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      createdAt: `${systemDate} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
       read: false,
       type: 'loan',
     };
@@ -496,57 +583,90 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return { success: true };
   };
 
-  // Le Gérant accepte la demande (statut -> 'accepted')
-  // Note : tant que la remise physique n'est pas faite, l'emprunt n'est PAS actif
-  const acceptLoanRequest = (loanId: string) => {
+  // 2. Le Gérant accepte la demande (statut -> 'accepted')
+  // CRITIQUE : Cette action RÉSERVE l'exemplaire pour éviter toute surréservation !
+  const acceptLoanRequest = (loanId: string): { success: boolean; error?: string } => {
+    const targetLoan = loans.find((l) => l.id === loanId);
+    if (!targetLoan) {
+      return { success: false, error: 'Demande introuvable.' };
+    }
+
+    if (targetLoan.status !== 'pending') {
+      return { success: false, error: 'Cette demande a déjà été traitée.' };
+    }
+
+    const targetBook = books.find((b) => b.id === targetLoan.bookId);
+    if (!targetBook || targetBook.availableCopies <= 0) {
+      return {
+        success: false,
+        error: "Stock insuffisant : aucun exemplaire n'est actuellement disponible en rayon pour accepter cette demande.",
+      };
+    }
+
     setLoans((prev) =>
       prev.map((l) => (l.id === loanId ? { ...l, status: 'accepted' } : l))
     );
 
-    const targetLoan = loans.find((l) => l.id === loanId);
-    if (targetLoan) {
-      const notif: Notification = {
-        id: `NOTIF-${Date.now()}`,
-        userId: targetLoan.studentId,
-        title: 'Demande d’emprunt acceptée !',
-        message: `Votre demande pour « ${targetLoan.bookTitle} » a été acceptée. Veuillez vous présenter à la bibliothèque pour la remise physique du livre.`,
-        createdAt: TODAY_DATE + ' ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-        read: false,
-        type: 'loan',
-      };
-      setNotifications((prev) => [notif, ...prev]);
-    }
+    // Notification à l'étudiant
+    const notif: Notification = {
+      id: `NOTIF-${Date.now()}`,
+      userId: targetLoan.studentId,
+      title: 'Demande d’emprunt acceptée ! (Exemplaire réservé)',
+      message: `Votre demande pour « ${targetLoan.bookTitle} » a été acceptée. Un exemplaire vous est réservé au comptoir. Veuillez vous présenter à la bibliothèque pour la remise physique.`,
+      createdAt: `${systemDate} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+      read: false,
+      type: 'loan',
+    };
+    setNotifications((prev) => [notif, ...prev]);
+
+    return { success: true };
   };
 
-  // Le Gérant refuse la demande
-  const refuseLoanRequest = (loanId: string, reason?: string) => {
+  // 3. Le Gérant refuse la demande
+  const refuseLoanRequest = (loanId: string, reason?: string): { success: boolean; error?: string } => {
+    const targetLoan = loans.find((l) => l.id === loanId);
+    if (!targetLoan) {
+      return { success: false, error: 'Demande introuvable.' };
+    }
+
+    if (targetLoan.status === 'active' || targetLoan.status === 'returned') {
+      return { success: false, error: 'Impossible de refuser un emprunt déjà en cours ou retourné.' };
+    }
+
     setLoans((prev) =>
       prev.map((l) => (l.id === loanId ? { ...l, status: 'refused', reportReason: reason } : l))
     );
 
-    const targetLoan = loans.find((l) => l.id === loanId);
-    if (targetLoan) {
-      const notif: Notification = {
-        id: `NOTIF-${Date.now()}`,
-        userId: targetLoan.studentId,
-        title: 'Demande d’emprunt refusée',
-        message: `Votre demande pour « ${targetLoan.bookTitle} » a été refusée par le Gérant${reason ? ' : ' + reason : '.'}`,
-        createdAt: TODAY_DATE + ' ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-        read: false,
-        type: 'info',
-      };
-      setNotifications((prev) => [notif, ...prev]);
-    }
+    const notif: Notification = {
+      id: `NOTIF-${Date.now()}`,
+      userId: targetLoan.studentId,
+      title: 'Demande d’emprunt refusée',
+      message: `Votre demande pour « ${targetLoan.bookTitle} » a été refusée par le Gérant${reason ? ' : ' + reason : '.'}`,
+      createdAt: `${systemDate} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
+      read: false,
+      type: 'info',
+    };
+    setNotifications((prev) => [notif, ...prev]);
+
+    return { success: true };
   };
 
-  // Confirmation de la remise physique du livre à l'étudiant
-  // L'emprunt devient alors réellement 'active', la date d'emprunt réelle est enregistrée, et le stock est décrémenté
-  const confirmPhysicalHandover = (loanId: string) => {
+  // 4. Confirmation de la remise physique du livre à l'étudiant
+  // L'emprunt devient alors réellement 'active', la date réelle de remise et l'échéance sont enregistrées
+  const confirmPhysicalHandover = (loanId: string): { success: boolean; error?: string } => {
     const targetLoan = loans.find((l) => l.id === loanId);
-    if (!targetLoan) return;
+    if (!targetLoan) {
+      return { success: false, error: 'Emprunt introuvable.' };
+    }
 
-    const returnDueDate = new Date();
-    returnDueDate.setDate(returnDueDate.getDate() + 14);
+    if (targetLoan.status !== 'accepted') {
+      return {
+        success: false,
+        error: "La remise physique nécessite que la demande ait d'abord été acceptée.",
+      };
+    }
+
+    const returnDueDate = addDays(systemDate, 14);
 
     setLoans((prev) =>
       prev.map((l) =>
@@ -554,19 +674,19 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ? {
               ...l,
               status: 'active',
-              borrowedDate: TODAY_DATE,
-              dueDate: returnDueDate.toISOString().split('T')[0],
+              borrowedDate: systemDate,
+              dueDate: returnDueDate,
               daysOverdue: 0,
             }
           : l
       )
     );
 
-    // Mettre à jour l'étudiant
+    // Mettre à jour la fiche de l'étudiant
     setStudents((prev) =>
       prev.map((s) =>
         s.id === targetLoan.studentId
-          ? { ...s, activeLoanBookIds: [...s.activeLoanBookIds, targetLoan.bookId] }
+          ? { ...s, activeLoanBookIds: Array.from(new Set([...s.activeLoanBookIds, targetLoan.bookId])) }
           : s
       )
     );
@@ -575,17 +695,24 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const notif: Notification = {
       id: `NOTIF-${Date.now()}`,
       userId: targetLoan.studentId,
-      title: 'Emprunt confirmé (Remise effectuée)',
-      message: `L'exemplaire de « ${targetLoan.bookTitle} » vous a été remis physiquement. Date limite de restitution : ${returnDueDate.toISOString().split('T')[0]}.`,
-      createdAt: TODAY_DATE + ' ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      title: 'Emprunt confirmé (Remise physique effectuée)',
+      message: `L'exemplaire de « ${targetLoan.bookTitle} » vous a été remis physiquement. Date limite de restitution : ${returnDueDate}.`,
+      createdAt: `${systemDate} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
       read: false,
       type: 'due',
     };
     setNotifications((prev) => [notif, ...prev]);
+
+    return { success: true };
   };
 
   // =========================================================================
-  // GESTION DES RETOURS
+  // GESTION DES RETOURS ET ÉTAT DES EXEMPLAIRES
+  // Règles obligatoires :
+  // - Bon état : redevient disponible (+1 available, -1 borrowed)
+  // - Endommagé : marqué indisponible (+1 unavailable, -1 borrowed)
+  // - Perdu : jamais ajouté au stock disponible (-1 borrowed, +1 lost)
+  // - Empêche strictement de valider deux fois le retour d'un même exemplaire
   // =========================================================================
   const processPhysicalReturn = (
     loanId: string,
@@ -598,26 +725,64 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
 
     if (targetLoan.status === 'returned') {
-      return { success: false, error: 'Cet exemplaire a déjà été retourné.' };
+      return {
+        success: false,
+        error: `Cet exemplaire a déjà été retourné le ${targetLoan.returnDate || 'précédemment'}. Un retour ne peut pas être enregistré deux fois.`,
+      };
     }
 
-    // Clôture propre
+    // Calcul pénalité additionnelle selon l'état
+    let penaltyFeeMad = 0;
+    if (condition === 'damaged') {
+      penaltyFeeMad = penaltyRule.damagedBookFeeMad;
+    } else if (condition === 'lost') {
+      penaltyFeeMad = penaltyRule.lostBookFeeMad;
+    }
+
+    // Ajout éventuel du retard
+    const overdueDays = calculateDaysOverdue(targetLoan.dueDate, systemDate);
+    if (overdueDays > 0) {
+      penaltyFeeMad += overdueDays * penaltyRule.feePerDayMad;
+    }
+
+    // Clôture définitive du prêt
     setLoans((prev) =>
       prev.map((l) =>
         l.id === loanId
           ? {
               ...l,
               status: 'returned',
-              returnDate: TODAY_DATE,
+              returnDate: systemDate,
               condition,
               reportReason: notes,
               daysOverdue: 0,
+              penaltyFeeMad,
             }
           : l
       )
     );
 
-    // Retirer de la liste de l'étudiant
+    // Ajustement de l'exemplaire selon son état
+    setBooks((prev) =>
+      prev.map((b) => {
+        if (b.id !== targetLoan.bookId) return b;
+        if (condition === 'damaged') {
+          return {
+            ...b,
+            unavailableCopies: (b.unavailableCopies || 0) + 1,
+          };
+        } else if (condition === 'lost') {
+          return {
+            ...b,
+            lostCopies: (b.lostCopies || 0) + 1,
+            totalCopies: Math.max(0, b.totalCopies - 1),
+          };
+        }
+        return b;
+      })
+    );
+
+    // Retirer de la liste des prêts actifs de l'étudiant
     setStudents((prev) =>
       prev.map((s) =>
         s.id === targetLoan.studentId
@@ -629,13 +794,20 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       )
     );
 
-    // Notification
+    // Notification à l'étudiant
+    const conditionLabel =
+      condition === 'good'
+        ? 'Bon état (conforme)'
+        : condition === 'damaged'
+        ? `Endommagé (Forfait réparation : ${penaltyRule.damagedBookFeeMad} MAD)`
+        : `Déclaré perdu (Forfait remplacement : ${penaltyRule.lostBookFeeMad} MAD)`;
+
     const notif: Notification = {
       id: `NOTIF-${Date.now()}`,
       userId: targetLoan.studentId,
-      title: 'Restitution confirmée',
-      message: `Votre retour de « ${targetLoan.bookTitle} » a été validé (État : ${condition === 'good' ? 'Bon état' : condition === 'damaged' ? 'Endommagé' : 'Perdu'}).`,
-      createdAt: TODAY_DATE + ' ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      title: 'Restitution physique enregistrée',
+      message: `Votre retour de « ${targetLoan.bookTitle} » a été validé. État constaté : ${conditionLabel}.`,
+      createdAt: `${systemDate} ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`,
       read: false,
       type: 'return',
     };
@@ -733,9 +905,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return false;
     }
 
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() + 14);
-
+    const dueDate = addDays(systemDate, 14);
     const newLoanId = `EMPR-EST-${Date.now().toString().slice(-4)}`;
     const newLoan: Loan = {
       id: newLoanId,
@@ -747,10 +917,10 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       studentName: foundStudent.name,
       studentEmail: foundStudent.email,
       studentCardId: foundStudent.studentCardId,
-      requestDate: TODAY_DATE,
-      borrowedDate: TODAY_DATE,
-      dueDate: dueDate.toISOString().split('T')[0],
-      status: 'active', // Directement actif car remise physique effectuée au comptoir
+      requestDate: systemDate,
+      borrowedDate: systemDate,
+      dueDate,
+      status: 'active', // Directement actif car remise physique effectuée au comptoir de scan
       daysOverdue: 0,
     };
 
@@ -758,7 +928,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setStudents((prev) =>
       prev.map((s) =>
         s.id === foundStudent.id
-          ? { ...s, activeLoanBookIds: [...s.activeLoanBookIds, currentBook.id] }
+          ? { ...s, activeLoanBookIds: Array.from(new Set([...s.activeLoanBookIds, currentBook.id])) }
           : s
       )
     );
@@ -885,31 +1055,8 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
       return false;
     }
 
-    // Clôture automatique sans clic
-    setLoans((prev) =>
-      prev.map((l) =>
-        l.id === matchingLoan.id
-          ? {
-              ...l,
-              status: 'returned',
-              returnDate: TODAY_DATE,
-              condition: 'good',
-              daysOverdue: 0,
-            }
-          : l
-      )
-    );
-
-    setStudents((prev) =>
-      prev.map((s) =>
-        s.id === foundStudent.id
-          ? {
-              ...s,
-              activeLoanBookIds: s.activeLoanBookIds.filter((id) => id !== currentBook.id),
-            }
-          : s
-      )
-    );
+    // Clôture automatique sans clic (Bon état par défaut au poste rapide)
+    processPhysicalReturn(matchingLoan.id, 'good', 'Restitution automatique par scan rapide');
 
     setScanReturnState({
       scannedBook: null,
@@ -938,6 +1085,8 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     <LibraryContext.Provider
       value={{
         currentUser,
+        authMode,
+        systemDate,
         login,
         logout,
         books,
@@ -949,7 +1098,9 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         totalBooksCount,
         totalCopiesCount,
         availableCopiesCount,
+        reservedCopiesCount,
         borrowedCopiesCount,
+        unavailableCopiesCount,
         overdueLoansCount,
         pendingRequestsCount,
         returnsToProcessCount,
@@ -962,6 +1113,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateBook,
         deleteOrArchiveBook,
         addCategory,
+        repairDamagedBook,
         acceptLoanRequest,
         refuseLoanRequest,
         confirmPhysicalHandover,

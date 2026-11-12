@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLibrary, TODAY_DATE } from '../context/LibraryContext';
+import { useLibrary } from '../context/LibraryContext';
 import { Book, Loan } from '../types';
 import {
   Search,
@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { BookDetailPage } from './BookDetailPage';
 import { QRCodeView } from './QRCodeView';
+import { formatDisplayDate } from '../utils/dateUtils';
 
 export const StudentPortal: React.FC = () => {
   const {
@@ -29,6 +30,7 @@ export const StudentPortal: React.FC = () => {
     loans,
     notifications,
     currentUser,
+    systemDate,
     selectedBookForDetail,
     setSelectedBookForDetail,
     requestBookLoan,
@@ -482,16 +484,16 @@ export const StudentPortal: React.FC = () => {
                     <div className="text-slate-600 mt-1 flex flex-wrap items-center gap-x-3 text-[11px]">
                       <span>Cote : <strong>{loan.bookShelf}</strong></span>
                       <span>·</span>
-                      <span>Date demande : {loan.requestDate || TODAY_DATE}</span>
+                      <span>Date demande : {formatDisplayDate(loan.requestDate || systemDate)}</span>
                       {loan.borrowedDate && (
                         <>
                           <span>·</span>
-                          <span>Remis le : {loan.borrowedDate}</span>
+                          <span>Remis le : {formatDisplayDate(loan.borrowedDate)}</span>
                         </>
                       )}
                       <span>·</span>
                       <span className="font-bold text-slate-800">
-                        Date limite : {loan.dueDate}
+                        Date limite : {formatDisplayDate(loan.dueDate)}
                       </span>
                     </div>
 
@@ -529,7 +531,7 @@ export const StudentPortal: React.FC = () => {
                     {loan.status === 'returned' && (
                       <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300">
                         <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span>Restitué le {loan.returnDate}</span>
+                        <span>Restitué le {formatDisplayDate(loan.returnDate || systemDate)}</span>
                       </span>
                     )}
 

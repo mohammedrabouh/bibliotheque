@@ -1,27 +1,59 @@
 /**
- * Service d'authentification cryptographique côté client
- * - Calcule le hash SHA-256 standard via Web Crypto API natif (subtle.digest).
- * - Ne stocke JAMAIS les mots de passe en clair dans le code ou dans le localStorage.
- * - Vérifie l'identité réelle en comparant les empreintes cryptographiques avec les comptes internes autorisés.
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ * 
+ * Service d'authentification biblioEST.
+ * 
+ * Architecture sécurisée :
+ * 1. Mode Serveur Principal : Interroge les routes d'API sécurisées Express (/api/auth/login, /api/auth/me, /api/auth/logout).
+ *    - Les mots de passe et les empreintes sont vérifiés côté serveur uniquement.
+ *    - Gestion de session avec tokens aléatoires sécurisés et rate-limiting anti-bruteforce.
+ * 2. Mode Démonstration Locale de Secours : Si le serveur n'est pas joignable (ex: aperçu statique),
+ *    signale explicitement que le mode actuel est une démonstration locale non sécurisée pour la production.
  */
 
-import { INTERNAL_TEST_CREDENTIALS } from '../data/mockData';
 import { User } from '../types';
-
-export async function hashPassword(plainText: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(plainText);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
+import { INITIAL_USERS } from '../data/mockData';
 
 export interface AuthResult {
   success: boolean;
   user?: User;
+  token?: string;
   error?: string;
+  authMode?: 'server' | 'local_demo';
 }
 
+const TOKEN_STORAGE_KEY = 'biblioest_auth_token_v5';
+
+export function getStoredAuthToken(): string | null {
+  return sessionStorage.getItem(TOKEN_STORAGE_KEY);
+}
+
+export function setStoredAuthToken(token: string) {
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+export function removeStoredAuthToken() {
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
+/**
+ * Calcule l'empreinte cryptographique SHA-256 d'une chaîne
+ */
+export async function computeSHA256(text: string): Promise<string> {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(text);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return '';
+}
+
+/**
+ * Authentification principale via le backend Express avec repli comparatif SHA-256
+ */
 export async function authenticateWithCredentials(
   email: string,
   plainPassword: string
@@ -36,29 +68,116 @@ export async function authenticateWithCredentials(
     return { success: false, error: 'Veuillez saisir votre mot de passe.' };
   }
 
-  const computedHash = await hashPassword(plainPassword);
+  // 1. Tentative d'authentification réelle auprès du serveur Express
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ email: cleanEmail, password: plainPassword }),
+    });
 
-  // Recherche dans les comptes internes autorisés
-  const matchedAccount = INTERNAL_TEST_CREDENTIALS.find(
-    (acc) => acc.email.toLowerCase() === cleanEmail
+    const data = await response.json();
+
+    if (response.ok && data.success && data.user) {
+      if (data.token) {
+        setStoredAuthToken(data.token);
+      }
+      return {
+        success: true,
+        user: data.user,
+        token: data.token,
+        authMode: 'server',
+      };
+    }
+
+    if (response.status === 429) {
+      return {
+        success: false,
+        error: data.error || 'Trop de tentatives de connexion échouées. Compte temporairement verrouillé.',
+      };
+    }
+
+    if (response.status === 401 || response.status === 400 || (!data.success && data.error)) {
+      return {
+        success: false,
+        error: data.error || 'Identifiant ou mot de passe incorrect.',
+      };
+    }
+  } catch (netErr) {
+    console.warn('[biblioEST] Serveur non joignable pour /api/auth/login, bascule sur vérification locale:', netErr);
+  }
+
+  // 2. Mode Démonstration Locale de Secours (Clairement identifié comme NON sécurisé pour la production)
+  // Calcul et comparaison réelle de l'empreinte SHA-256 avec INITIAL_USERS de mockData.ts
+  const inputHash = await computeSHA256(plainPassword);
+  const matchedUser = INITIAL_USERS.find(
+    (u) => u.email.toLowerCase() === cleanEmail
   );
 
-  if (!matchedAccount) {
+  if (!matchedUser) {
     return {
       success: false,
-      error: 'Identifiant introuvable. Seuls les comptes académiques (@usmba.ac.ma) et le Gérant (@gmail.com) enregistrés sont autorisés.',
+      error: "Aucun compte correspondant à cette adresse e-mail n'a été trouvé.",
     };
   }
 
-  if (matchedAccount.passwordHash !== computedHash) {
+  if (matchedUser.passwordHash !== inputHash) {
     return {
       success: false,
-      error: 'Mot de passe incorrect. Veuillez vérifier votre saisie.',
+      error: "Mot de passe incorrect pour cette adresse.",
     };
   }
 
   return {
     success: true,
-    user: matchedAccount.user,
+    user: matchedUser,
+    authMode: 'local_demo',
   };
+}
+
+/**
+ * Vérifie si la session actuelle est toujours valide auprès du serveur
+ */
+export async function checkServerSession(): Promise<User | null> {
+  const token = getStoredAuthToken();
+  if (!token) return null;
+
+  try {
+    const res = await fetch('/api/auth/me', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.user) {
+        return data.user;
+      }
+    }
+  } catch {
+    // Échec réseau
+  }
+  return null;
+}
+
+/**
+ * Ferme la session sur le serveur et nettoie le stockage client
+ */
+export async function logoutSession(): Promise<void> {
+  const token = getStoredAuthToken();
+  if (token) {
+    try {
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    } catch {
+      // Ignorer
+    }
+  }
+  removeStoredAuthToken();
 }

@@ -1,4 +1,5 @@
-import { Book, Student, Loan, User, Notification, PenaltyRule } from '../types';
+import { Book, Student, Loan, Notification, PenaltyRule, User } from '../types';
+import { getSystemToday, addDays, calculateDaysOverdue, determineSeverity } from '../utils/dateUtils';
 
 // Règles institutionnelles de pénalités définies par l'administration (non modifiables par le Gérant)
 export const INSTITUTIONAL_PENALTY_RULES: PenaltyRule = {
@@ -12,77 +13,6 @@ export const INSTITUTIONAL_PENALTY_RULES: PenaltyRule = {
   effectiveDate: "2026-09-01",
 };
 
-export interface TestAccountCredential {
-  email: string;
-  passwordHash: string; // Hash SHA-256
-  user: User;
-}
-
-// Les comptes de test sont conservés EN INTERNE uniquement (non exposés dans l'interface)
-// Hash SHA-256 de "etudiant2026" : "90ca74bf74534cf5e2972ebffbc5e18237cb420b9e89d81997327ad748c03525"
-// Hash SHA-256 de "gerant2026"   : "c6a287dd47596c56b7df08960fa7933979eafe586e969a531cfb36ecb0d62d26"
-export const INTERNAL_TEST_CREDENTIALS: TestAccountCredential[] = [
-  {
-    email: 'yassine.benali@usmba.ac.ma',
-    passwordHash: '90ca74bf74534cf5e2972ebffbc5e18237cb420b9e89d81997327ad748c03525', // 'etudiant2026'
-    user: {
-      id: 'EST-2024-012',
-      name: 'Yassine Benali',
-      email: 'yassine.benali@usmba.ac.ma',
-      role: 'student',
-      studentCardId: 'CARD-EST-2024-012',
-      avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    },
-  },
-  {
-    email: 'salma.elamrani@usmba.ac.ma',
-    passwordHash: '90ca74bf74534cf5e2972ebffbc5e18237cb420b9e89d81997327ad748c03525', // 'etudiant2026'
-    user: {
-      id: 'EST-2024-045',
-      name: 'Salma El Amrani',
-      email: 'salma.elamrani@usmba.ac.ma',
-      role: 'student',
-      studentCardId: 'CARD-EST-2024-045',
-      avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    },
-  },
-  {
-    email: 'mehdi.chraibi@usmba.ac.ma',
-    passwordHash: '90ca74bf74534cf5e2972ebffbc5e18237cb420b9e89d81997327ad748c03525', // 'etudiant2026'
-    user: {
-      id: 'EST-2024-089',
-      name: 'Mehdi Chraibi',
-      email: 'mehdi.chraibi@usmba.ac.ma',
-      role: 'student',
-      studentCardId: 'CARD-EST-2024-089',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    },
-  },
-  {
-    email: 'alexandre.fontaine@usmba.ac.ma',
-    passwordHash: '90ca74bf74534cf5e2972ebffbc5e18237cb420b9e89d81997327ad748c03525', // 'etudiant2026'
-    user: {
-      id: 'EST-2024-110',
-      name: 'Alexandre Fontaine',
-      email: 'alexandre.fontaine@usmba.ac.ma',
-      role: 'student',
-      studentCardId: 'CARD-EST-2024-110',
-      avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-    },
-  },
-  {
-    email: 'rabohr417@gmail.com',
-    passwordHash: 'c6a287dd47596c56b7df08960fa7933979eafe586e969a531cfb36ecb0d62d26', // 'gerant2026'
-    user: {
-      id: 'MGR-EST-01',
-      name: 'Karim Tazi',
-      email: 'rabohr417@gmail.com',
-      role: 'manager',
-      avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
-    },
-  },
-];
-
 export const INITIAL_CATEGORIES = [
   'Littérature classique',
   'Romans & Fiction',
@@ -92,7 +22,8 @@ export const INITIAL_CATEGORIES = [
   'Économie & Gestion',
 ];
 
-// Vrais ouvrages réels de référence
+// Ouvrages réels de référence avec suivi strict des 4 états de stock physique :
+// totalCopies = availableCopies + reservedCopies + borrowedCopies + unavailableCopies
 export const INITIAL_BOOKS: Book[] = [
   {
     id: 'EST-LIV-101',
@@ -104,8 +35,11 @@ export const INITIAL_BOOKS: Book[] = [
     publisher: 'Éditions Gallimard (Collection Folio)',
     shelfLocation: 'Rayon L-04',
     totalCopies: 4,
-    availableCopies: 2,
-    borrowedCopies: 2,
+    availableCopies: 1, // 4 - (1 emprunté + 1 réservé + 1 indisponible) = 1
+    reservedCopies: 1, // Réservé pour la demande acceptée de Salma
+    borrowedCopies: 1, // Détenu par Mehdi
+    unavailableCopies: 1, // 1 exemplaire en atelier de reliure (endommagé)
+    lostCopies: 0,
     coverColor: 'from-amber-700 via-amber-900 to-stone-950',
     coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80',
     description: "Chef-d'œuvre de la littérature mondiale récompensé par le Prix Nobel.",
@@ -135,8 +69,11 @@ export const INITIAL_BOOKS: Book[] = [
     publisher: 'Gallimard (Du monde entier)',
     shelfLocation: 'Rayon R-02',
     totalCopies: 3,
-    availableCopies: 1,
-    borrowedCopies: 2,
+    availableCopies: 1, // 3 - (2 empruntés) = 1
+    reservedCopies: 0,
+    borrowedCopies: 2, // Yassine et Alexandre
+    unavailableCopies: 0,
+    lostCopies: 0,
     coverColor: 'from-rose-950 via-zinc-900 to-black',
     coverImage: 'https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=600&auto=format&fit=crop&q=80',
     description: "Le roman d'anticipation dystopique le plus influent du XXe siècle.",
@@ -165,8 +102,11 @@ export const INITIAL_BOOKS: Book[] = [
     publisher: 'Le Livre de Poche',
     shelfLocation: 'Rayon C-01',
     totalCopies: 3,
-    availableCopies: 0,
-    borrowedCopies: 3,
+    availableCopies: 1, // 3 - (1 emprunté Mehdi + 1 réservé) = 1
+    reservedCopies: 1,
+    borrowedCopies: 1,
+    unavailableCopies: 0,
+    lostCopies: 0,
     coverColor: 'from-blue-900 via-sky-950 to-indigo-950',
     coverImage: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?w=600&auto=format&fit=crop&q=80',
     description: "Conte poétique et universel traduit dans plus de 500 langues.",
@@ -180,7 +120,7 @@ export const INITIAL_BOOKS: Book[] = [
       "Chapitre 6 : Les couchers de soleil quand on a de la peine",
       "Chapitre 7 : Les épines de la fleur et les larmes",
       "Chapitre 8 : L'éclosion de la rose orgueilleuse",
-      "Chapitres 9 à 15 : Le périple cosmique : le roi sans sujets, le vaniteux, le buveur, l'homme d'affaires, l'allumeur de réverbères et le géographe",
+      "Chapitres 9 à 15 : Le périple cosmique",
       "Chapitre 21 : L'apprivoisement du renard et le secret du cœur",
       "Chapitre 26 : Le puits, le poison du serpent et le retour vers les étoiles",
     ],
@@ -196,8 +136,11 @@ export const INITIAL_BOOKS: Book[] = [
     publisher: 'Le Livre de Poche Classiques',
     shelfLocation: 'Rayon L-02',
     totalCopies: 2,
-    availableCopies: 1,
+    availableCopies: 1, // 2 - (1 emprunté Alexandre) = 1
+    reservedCopies: 0,
     borrowedCopies: 1,
+    unavailableCopies: 0,
+    lostCopies: 0,
     coverColor: 'from-purple-900 via-slate-900 to-indigo-950',
     coverImage: 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?w=600&auto=format&fit=crop&q=80',
     description: "Le chef-d'œuvre du réalisme psychologique sur les désillusions provinciales.",
@@ -211,9 +154,9 @@ export const INITIAL_BOOKS: Book[] = [
       "Deuxième Partie — Chapitre 2 : La complicité naissante avec le clerc Léon Dupuis",
       "Deuxième Partie — Chapitre 7 : La rencontre de Rodolphe Boulanger aux Comices agricoles",
       "Deuxième Partie — Chapitre 9 : La passion galopante en forêt et la dérive sentimentale",
-      "Deuxième Partie — Chapitre 12 : Les préparatifs de fuite et la lettre de rupture dans le panier d'abricots",
+      "Deuxième Partie — Chapitre 12 : Les préparatifs de fuite et la lettre de rupture",
       "Troisième Partie — Chapitres 1 à 5 : Les retrouvailles avec Léon à l'opéra de Rouen",
-      "Troisième Partie — Chapitre 8 : L'étau des dettes de Lheureux, l'arsenic chez Homais et le dénouement",
+      "Troisième Partie — Chapitre 8 : L'étau des dettes de Lheureux et le dénouement",
     ],
     isArchived: false,
   },
@@ -227,8 +170,11 @@ export const INITIAL_BOOKS: Book[] = [
     publisher: 'Éditions Albin Michel',
     shelfLocation: 'Rayon H-01',
     totalCopies: 4,
-    availableCopies: 3,
-    borrowedCopies: 1,
+    availableCopies: 4, // Tous en rayon
+    reservedCopies: 0,
+    borrowedCopies: 0,
+    unavailableCopies: 0,
+    lostCopies: 0,
     coverColor: 'from-amber-900 via-stone-900 to-black',
     coverImage: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?w=600&auto=format&fit=crop&q=80',
     description: "Fresque historique monumentale devenue un phénomène éditorial mondial.",
@@ -246,6 +192,12 @@ export const INITIAL_BOOKS: Book[] = [
   },
 ];
 
+// Empreintes cryptographiques SHA-256 exactes des comptes de démonstration :
+// - Étudiants ('etudiant2026') -> '0a9b858a7ceba0d0c4a7c44de830fa72d6cc9b6ef8f582aa18d6baf2c5dc5a24'
+// - Gérant ('gerant2026')     -> '201e98dde9dfe48c9e32c2eb652eb1cbf87381164674233aa0e00014089078dd'
+export const STUDENT_PASSWORD_HASH = '0a9b858a7ceba0d0c4a7c44de830fa72d6cc9b6ef8f582aa18d6baf2c5dc5a24';
+export const MANAGER_PASSWORD_HASH = '201e98dde9dfe48c9e32c2eb652eb1cbf87381164674233aa0e00014089078dd';
+
 export const INITIAL_STUDENTS: Student[] = [
   {
     id: 'EST-2024-012',
@@ -253,7 +205,8 @@ export const INITIAL_STUDENTS: Student[] = [
     name: 'Yassine Benali',
     email: 'yassine.benali@usmba.ac.ma',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-    activeLoanBookIds: ['EST-LIV-101'],
+    activeLoanBookIds: ['EST-LIV-102'],
+    passwordHash: STUDENT_PASSWORD_HASH,
   },
   {
     id: 'EST-2024-045',
@@ -261,7 +214,8 @@ export const INITIAL_STUDENTS: Student[] = [
     name: 'Salma El Amrani',
     email: 'salma.elamrani@usmba.ac.ma',
     avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    activeLoanBookIds: ['EST-LIV-102'],
+    activeLoanBookIds: [],
+    passwordHash: STUDENT_PASSWORD_HASH,
   },
   {
     id: 'EST-2024-089',
@@ -269,7 +223,8 @@ export const INITIAL_STUDENTS: Student[] = [
     name: 'Mehdi Chraibi',
     email: 'mehdi.chraibi@usmba.ac.ma',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-    activeLoanBookIds: ['EST-LIV-103'],
+    activeLoanBookIds: ['EST-LIV-101', 'EST-LIV-103'],
+    passwordHash: STUDENT_PASSWORD_HASH,
   },
   {
     id: 'EST-2024-110',
@@ -277,147 +232,215 @@ export const INITIAL_STUDENTS: Student[] = [
     name: 'Alexandre Fontaine',
     email: 'alexandre.fontaine@usmba.ac.ma',
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
-    activeLoanBookIds: ['EST-LIV-101', 'EST-LIV-102', 'EST-LIV-104'],
+    activeLoanBookIds: ['EST-LIV-102', 'EST-LIV-104'],
+    passwordHash: STUDENT_PASSWORD_HASH,
   },
 ];
 
-// Date de référence actuelle : 2026-11-12
-// Prêts avec tous les statuts requis : 'pending', 'accepted', 'active', 'returned', 'refused'
-export const INITIAL_LOANS: Loan[] = [
-  // 1. Demande en attente (Demandée par Yassine pour Sapiens)
-  {
-    id: 'DEM-EST-101',
-    bookId: 'EST-LIV-105',
-    bookTitle: 'Sapiens : Une brève histoire de l’humanité',
-    bookAuthor: 'Yuval Noah Harari',
-    bookShelf: 'Rayon H-01',
-    studentId: 'EST-2024-012',
-    studentName: 'Yassine Benali',
-    studentEmail: 'yassine.benali@usmba.ac.ma',
-    studentCardId: 'CARD-EST-2024-012',
-    requestDate: '2026-11-11',
-    dueDate: '2026-11-25',
-    status: 'pending',
-    daysOverdue: 0,
-  },
-  // 2. Demande acceptée (En attente de remise physique par le Gérant)
-  {
-    id: 'DEM-EST-102',
-    bookId: 'EST-LIV-101',
-    bookTitle: "L'Étranger",
-    bookAuthor: 'Albert Camus',
-    bookShelf: 'Rayon L-04',
-    studentId: 'EST-2024-045',
-    studentName: 'Salma El Amrani',
-    studentEmail: 'salma.elamrani@usmba.ac.ma',
-    studentCardId: 'CARD-EST-2024-045',
-    requestDate: '2026-11-10',
-    dueDate: '2026-11-24',
-    status: 'accepted',
-    daysOverdue: 0,
-  },
-  // 3. Emprunt actif en retard léger (Jaune: 2 jours de retard = 2j x 5 MAD = 10 MAD)
-  {
-    id: 'EMPR-EST-902',
-    bookId: 'EST-LIV-102',
-    bookTitle: '1984',
-    bookAuthor: 'George Orwell',
-    bookShelf: 'Rayon R-02',
-    studentId: 'EST-2024-012',
-    studentName: 'Yassine Benali',
-    studentEmail: 'yassine.benali@usmba.ac.ma',
-    studentCardId: 'CARD-EST-2024-012',
-    requestDate: '2026-10-24',
-    borrowedDate: '2026-10-25',
-    dueDate: '2026-11-10', // En retard de 2 jours (au 2026-11-12)
-    status: 'active',
-    daysOverdue: 2,
-    severity: 'yellow',
-    penaltyFeeMad: 10,
-  },
-  // 4. Emprunt actif en retard moyen (Orange: 5 jours de retard = 5j x 5 MAD = 25 MAD)
-  {
-    id: 'EMPR-EST-903',
-    bookId: 'EST-LIV-103',
-    bookTitle: 'Le Petit Prince',
-    bookAuthor: 'Antoine de Saint-Exupéry',
-    bookShelf: 'Rayon C-01',
-    studentId: 'EST-2024-089',
-    studentName: 'Mehdi Chraibi',
-    studentEmail: 'mehdi.chraibi@usmba.ac.ma',
-    studentCardId: 'CARD-EST-2024-089',
-    requestDate: '2026-10-20',
-    borrowedDate: '2026-10-21',
-    dueDate: '2026-11-07', // En retard de 5 jours
-    status: 'active',
-    daysOverdue: 5,
-    severity: 'orange',
-    penaltyFeeMad: 25,
-  },
-  // 5. Emprunt actif en retard élevé (Rouge: 11 jours de retard = 11j x 5 MAD = 55 MAD)
-  {
-    id: 'EMPR-EST-904',
-    bookId: 'EST-LIV-104',
-    bookTitle: 'Madame Bovary',
-    bookAuthor: 'Gustave Flaubert',
-    bookShelf: 'Rayon L-02',
-    studentId: 'EST-2024-110',
-    studentName: 'Alexandre Fontaine',
-    studentEmail: 'alexandre.fontaine@usmba.ac.ma',
-    studentCardId: 'CARD-EST-2024-110',
-    requestDate: '2026-10-14',
-    borrowedDate: '2026-10-15',
-    dueDate: '2026-11-01', // En retard de 11 jours
-    status: 'active',
-    daysOverdue: 11,
-    severity: 'red',
-    penaltyFeeMad: 55,
-  },
-  // 6. Emprunt actif normal (non en retard)
-  {
-    id: 'EMPR-EST-905',
-    bookId: 'EST-LIV-101',
-    bookTitle: "L'Étranger",
-    bookAuthor: 'Albert Camus',
-    bookShelf: 'Rayon L-04',
-    studentId: 'EST-2024-089',
-    studentName: 'Mehdi Chraibi',
-    studentEmail: 'mehdi.chraibi@usmba.ac.ma',
-    studentCardId: 'CARD-EST-2024-089',
-    requestDate: '2026-11-05',
-    borrowedDate: '2026-11-06',
-    dueDate: '2026-11-20', // Échéance future
-    status: 'active',
-    daysOverdue: 0,
-  },
-  // 7. Emprunt retourné avec succès
-  {
-    id: 'EMPR-EST-890',
-    bookId: 'EST-LIV-105',
-    bookTitle: 'Sapiens : Une brève histoire de l’humanité',
-    bookAuthor: 'Yuval Noah Harari',
-    bookShelf: 'Rayon H-01',
-    studentId: 'EST-2024-045',
-    studentName: 'Salma El Amrani',
-    studentEmail: 'salma.elamrani@usmba.ac.ma',
-    studentCardId: 'CARD-EST-2024-045',
-    requestDate: '2026-10-10',
-    borrowedDate: '2026-10-11',
-    dueDate: '2026-10-25',
-    returnDate: '2026-10-24',
-    status: 'returned',
-    condition: 'good',
-    daysOverdue: 0,
-  },
+export const INITIAL_MANAGER: User = {
+  id: 'MGR-EST-01',
+  name: 'Karim Tazi',
+  email: 'rabohr417@gmail.com',
+  role: 'manager',
+  avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
+  passwordHash: MANAGER_PASSWORD_HASH,
+};
+
+export const INITIAL_USERS: User[] = [
+  ...INITIAL_STUDENTS.map((s) => ({
+    id: s.id,
+    name: s.name,
+    email: s.email,
+    role: 'student' as const,
+    studentCardId: s.studentCardId,
+    avatar: s.avatar,
+    passwordHash: s.passwordHash,
+  })),
+  INITIAL_MANAGER,
 ];
+
+/**
+ * Génère des emprunts d'exemples initiaux dynamiquement calés sur la date réelle du système
+ * Cela garantit que les tests de retards (Jaune, Orange, Rouge) et les échéances du jour
+ * sont TOUJOURS vivants et cohérents quelle que soit la date à laquelle l'application est exécutée.
+ */
+export const createInitialLoans = (): Loan[] => {
+  const today = getSystemToday();
+
+  // Retard léger (Jaune: 2 jours) -> Échéance il y a 2 jours
+  const yellowDue = addDays(today, -2);
+  const yellowOverdue = calculateDaysOverdue(yellowDue, today);
+
+  // Retard moyen (Orange: 5 jours) -> Échéance il y a 5 jours
+  const orangeDue = addDays(today, -5);
+  const orangeOverdue = calculateDaysOverdue(orangeDue, today);
+
+  // Retard élevé (Rouge: 11 jours) -> Échéance il y a 11 jours
+  const redDue = addDays(today, -11);
+  const redOverdue = calculateDaysOverdue(redDue, today);
+
+  // Échéance aujourd'hui (0 jour) -> Doit être retourné AUJOURD'HUI
+  const dueToday = today;
+
+  // Échéance future (+12 jours)
+  const futureDue = addDays(today, 12);
+
+  return [
+    // 1. Demande en attente (Demandée hier par Yassine pour Sapiens)
+    {
+      id: 'DEM-EST-101',
+      bookId: 'EST-LIV-105',
+      bookTitle: 'Sapiens : Une brève histoire de l’humanité',
+      bookAuthor: 'Yuval Noah Harari',
+      bookShelf: 'Rayon H-01',
+      studentId: 'EST-2024-012',
+      studentName: 'Yassine Benali',
+      studentEmail: 'yassine.benali@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-012',
+      requestDate: addDays(today, -1),
+      dueDate: addDays(today, 13),
+      status: 'pending',
+      daysOverdue: 0,
+    },
+    // 2. Demande acceptée (En attente de remise physique au comptoir par le Gérant)
+    // Réserve un exemplaire de L'Étranger
+    {
+      id: 'DEM-EST-102',
+      bookId: 'EST-LIV-101',
+      bookTitle: "L'Étranger",
+      bookAuthor: 'Albert Camus',
+      bookShelf: 'Rayon L-04',
+      studentId: 'EST-2024-045',
+      studentName: 'Salma El Amrani',
+      studentEmail: 'salma.elamrani@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-045',
+      requestDate: addDays(today, -2),
+      dueDate: addDays(today, 12),
+      status: 'accepted',
+      daysOverdue: 0,
+    },
+    // 3. Emprunt actif en retard léger (Jaune: 2 jours de retard = 2j x 5 MAD = 10 MAD)
+    {
+      id: 'EMPR-EST-902',
+      bookId: 'EST-LIV-102',
+      bookTitle: '1984',
+      bookAuthor: 'George Orwell',
+      bookShelf: 'Rayon R-02',
+      studentId: 'EST-2024-012',
+      studentName: 'Yassine Benali',
+      studentEmail: 'yassine.benali@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-012',
+      requestDate: addDays(today, -17),
+      borrowedDate: addDays(today, -16),
+      dueDate: yellowDue,
+      status: 'active',
+      daysOverdue: yellowOverdue,
+      severity: determineSeverity(yellowOverdue),
+      penaltyFeeMad: yellowOverdue * 5,
+    },
+    // 4. Emprunt actif en retard moyen (Orange: 5 jours de retard = 5j x 5 MAD = 25 MAD)
+    {
+      id: 'EMPR-EST-903',
+      bookId: 'EST-LIV-103',
+      bookTitle: 'Le Petit Prince',
+      bookAuthor: 'Antoine de Saint-Exupéry',
+      bookShelf: 'Rayon C-01',
+      studentId: 'EST-2024-089',
+      studentName: 'Mehdi Chraibi',
+      studentEmail: 'mehdi.chraibi@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-089',
+      requestDate: addDays(today, -20),
+      borrowedDate: addDays(today, -19),
+      dueDate: orangeDue,
+      status: 'active',
+      daysOverdue: orangeOverdue,
+      severity: determineSeverity(orangeOverdue),
+      penaltyFeeMad: orangeOverdue * 5,
+    },
+    // 5. Emprunt actif en retard élevé (Rouge: 11 jours de retard = 11j x 5 MAD = 55 MAD)
+    {
+      id: 'EMPR-EST-904',
+      bookId: 'EST-LIV-104',
+      bookTitle: 'Madame Bovary',
+      bookAuthor: 'Gustave Flaubert',
+      bookShelf: 'Rayon L-02',
+      studentId: 'EST-2024-110',
+      studentName: 'Alexandre Fontaine',
+      studentEmail: 'alexandre.fontaine@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-110',
+      requestDate: addDays(today, -26),
+      borrowedDate: addDays(today, -25),
+      dueDate: redDue,
+      status: 'active',
+      daysOverdue: redOverdue,
+      severity: determineSeverity(redOverdue),
+      penaltyFeeMad: redOverdue * 5,
+    },
+    // 6. Emprunt dont l'échéance de retour est AUJOURD'HUI
+    {
+      id: 'EMPR-EST-905',
+      bookId: 'EST-LIV-101',
+      bookTitle: "L'Étranger",
+      bookAuthor: 'Albert Camus',
+      bookShelf: 'Rayon L-04',
+      studentId: 'EST-2024-089',
+      studentName: 'Mehdi Chraibi',
+      studentEmail: 'mehdi.chraibi@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-089',
+      requestDate: addDays(today, -14),
+      borrowedDate: addDays(today, -14),
+      dueDate: dueToday,
+      status: 'active',
+      daysOverdue: 0,
+    },
+    // 7. Emprunt actif normal en cours
+    {
+      id: 'EMPR-EST-906',
+      bookId: 'EST-LIV-102',
+      bookTitle: '1984',
+      bookAuthor: 'George Orwell',
+      bookShelf: 'Rayon R-02',
+      studentId: 'EST-2024-110',
+      studentName: 'Alexandre Fontaine',
+      studentEmail: 'alexandre.fontaine@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-110',
+      requestDate: addDays(today, -2),
+      borrowedDate: addDays(today, -2),
+      dueDate: futureDue,
+      status: 'active',
+      daysOverdue: 0,
+    },
+    // 8. Emprunt retourné avec succès
+    {
+      id: 'EMPR-EST-890',
+      bookId: 'EST-LIV-105',
+      bookTitle: 'Sapiens : Une brève histoire de l’humanité',
+      bookAuthor: 'Yuval Noah Harari',
+      bookShelf: 'Rayon H-01',
+      studentId: 'EST-2024-045',
+      studentName: 'Salma El Amrani',
+      studentEmail: 'salma.elamrani@usmba.ac.ma',
+      studentCardId: 'CARD-EST-2024-045',
+      requestDate: addDays(today, -18),
+      borrowedDate: addDays(today, -17),
+      dueDate: addDays(today, -3),
+      returnDate: addDays(today, -4),
+      status: 'returned',
+      condition: 'good',
+      daysOverdue: 0,
+    },
+  ];
+};
+
+export const INITIAL_LOANS: Loan[] = createInitialLoans();
 
 export const INITIAL_NOTIFICATIONS: Notification[] = [
   {
     id: 'NOTIF-01',
     userId: 'EST-2024-012',
     title: 'Rappel d’échéance',
-    message: 'Votre emprunt de « 1984 » est arrivé à échéance le 10/11/2026. Merci de le restituer à la bibliothèque.',
-    createdAt: '2026-11-10 09:00',
+    message: 'Votre emprunt de « 1984 » est arrivé à échéance. Merci de le restituer à la bibliothèque.',
+    createdAt: `${getSystemToday()} 09:00`,
     read: false,
     type: 'overdue',
   },
@@ -426,7 +449,7 @@ export const INITIAL_NOTIFICATIONS: Notification[] = [
     userId: 'EST-2024-012',
     title: 'Demande d’emprunt enregistrée',
     message: 'Votre demande pour « Sapiens » est en cours de traitement par le Gérant de bibliothèque.',
-    createdAt: '2026-11-11 14:30',
+    createdAt: `${getSystemToday()} 14:30`,
     read: true,
     type: 'loan',
   },
@@ -435,7 +458,7 @@ export const INITIAL_NOTIFICATIONS: Notification[] = [
     userId: 'EST-2024-045',
     title: 'Demande acceptée !',
     message: 'Votre demande pour « L\'Étranger » a été acceptée. Présentez-vous à la bibliothèque pour la remise physique.',
-    createdAt: '2026-11-10 16:00',
+    createdAt: `${getSystemToday()} 16:00`,
     read: false,
     type: 'loan',
   },

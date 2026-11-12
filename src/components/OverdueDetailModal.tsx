@@ -1,6 +1,7 @@
 import React from 'react';
 import { Loan, Book, Student } from '../types';
 import { X, Clock, Mail, ShieldAlert, BookOpen, MapPin, User } from 'lucide-react';
+import { formatDisplayDate } from '../utils/dateUtils';
 
 interface OverdueDetailModalProps {
   loan: Loan;
@@ -131,11 +132,11 @@ export const OverdueDetailModal: React.FC<OverdueDetailModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-100 text-xs">
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                   <span className="text-slate-400 text-[10px] uppercase font-bold block">Emprunté le</span>
-                  <span className="font-medium text-slate-800">{loan.borrowedDate}</span>
+                  <span className="font-medium text-slate-800">{formatDisplayDate(loan.borrowedDate || loan.requestDate)}</span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                   <span className="text-slate-400 text-[10px] uppercase font-bold block">Date limite prévue</span>
-                  <span className="font-bold text-rose-600">{loan.dueDate}</span>
+                  <span className="font-bold text-rose-600">{formatDisplayDate(loan.dueDate)}</span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                   <span className="text-slate-400 text-[10px] uppercase font-bold block">Emplacement</span>

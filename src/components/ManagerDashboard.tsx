@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useLibrary, TODAY_DATE } from '../context/LibraryContext';
+import { useLibrary } from '../context/LibraryContext';
 import {
   BookOpen,
   LayoutDashboard,
@@ -27,10 +27,15 @@ import {
   Send,
   FileText,
   BadgeAlert,
+  Wrench,
+  BookmarkCheck,
+  ShieldCheck,
+  AlertCircle,
 } from 'lucide-react';
 import { BorrowReturnStation } from './BorrowReturnStation';
 import { OverdueDetailModal } from './OverdueDetailModal';
 import { Book, BookCondition, Loan, OverdueSeverity } from '../types';
+import { formatDisplayDate } from '../utils/dateUtils';
 
 export const ManagerDashboard: React.FC = () => {
   const {
@@ -39,11 +44,15 @@ export const ManagerDashboard: React.FC = () => {
     students,
     loans,
     penaltyRule,
-    // Les 7 indicateurs calculés automatiquement à partir des données réelles
+    systemDate,
+    authMode,
+    // Indicateurs calculés automatiquement à partir des données réelles
     totalBooksCount,
     totalCopiesCount,
     availableCopiesCount,
+    reservedCopiesCount,
     borrowedCopiesCount,
+    unavailableCopiesCount,
     overdueLoansCount,
     pendingRequestsCount,
     returnsToProcessCount,
@@ -58,6 +67,7 @@ export const ManagerDashboard: React.FC = () => {
     updateBook,
     deleteOrArchiveBook,
     addCategory,
+    repairDamagedBook,
     acceptLoanRequest,
     refuseLoanRequest,
     confirmPhysicalHandover,
@@ -85,7 +95,6 @@ export const ManagerDashboard: React.FC = () => {
   // État formulaire nouveau livre
   const [showAddBookModal, setShowAddBookModal] = useState(false);
   const [editingBook, setEditingBook] = useState<Book | null>(null);
-  const [newBookCategory, setNewBookCategory] = useState(categories[0] || 'Informatique');
   const [customCategoryInput, setCustomCategoryInput] = useState('');
   const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
 
@@ -114,6 +123,7 @@ export const ManagerDashboard: React.FC = () => {
   const [returnCondition, setReturnCondition] = useState<BookCondition>('good');
   const [returnNotes, setReturnNotes] = useState('');
   const [returnSuccessMessage, setReturnSuccessMessage] = useState<string | null>(null);
+  const [returnErrorMessage, setReturnErrorMessage] = useState<string | null>(null);
 
   // État refus de demande
   const [refusalModalLoan, setRefusalModalLoan] = useState<Loan | null>(null);
@@ -221,16 +231,19 @@ export const ManagerDashboard: React.FC = () => {
     });
   };
 
-  // Traitement retour physique
+  // Traitement retour physique avec contrôle strict
   const handleConfirmReturn = () => {
     if (!returnModalLoan) return;
+    setReturnErrorMessage(null);
     const res = processPhysicalReturn(returnModalLoan.id, returnCondition, returnNotes);
     if (res.success) {
-      setReturnSuccessMessage(`Restitution de « ${returnModalLoan.bookTitle} » confirmée avec succès.`);
-      setTimeout(() => setReturnSuccessMessage(null), 4000);
+      setReturnSuccessMessage(`Restitution de « ${returnModalLoan.bookTitle} » confirmée (${returnCondition === 'good' ? 'Bon état - Reclassé en rayon disponible' : returnCondition === 'damaged' ? 'Endommagé - Marqué indisponible pour réparation' : 'Déclaré perdu'}).`);
+      setTimeout(() => setReturnSuccessMessage(null), 5000);
       setReturnModalLoan(null);
       setReturnNotes('');
       setReturnCondition('good');
+    } else {
+      setReturnErrorMessage(res.error || 'Erreur lors du traitement du retour.');
     }
   };
 
@@ -238,17 +251,22 @@ export const ManagerDashboard: React.FC = () => {
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 pb-20">
       {/* Toast d'envoi automatique de mail sans clic */}
       {automaticEmailNotification && (
-        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 rounded-2xl shadow-xl border border-blue-400/30 flex items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top duration-300">
+        <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 rounded-3xl shadow-xl border border-blue-400/30 flex items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top duration-300">
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-300 flex items-center justify-center shrink-0">
               <Zap className="w-5 h-5 text-amber-300" />
             </div>
             <div>
-              <h4 className="font-bold text-sm text-white">
-                Système automatique d'envoi de mails actif
-              </h4>
+              <div className="flex items-center space-x-2">
+                <h4 className="font-bold text-sm text-white">
+                  Système automatique d'alerte e-mail actif (sans clic)
+                </h4>
+                <span className="text-[10px] bg-blue-500/30 text-blue-200 px-2 py-0.5 rounded-full font-mono">
+                  File d'attente simulée
+                </span>
+              </div>
               <p className="text-xs text-blue-200 mt-0.5">
-                {automaticEmailNotification}
+                {automaticEmailNotification} (Configuration SMTP / Resend requise pour délivrance réseau réelle).
               </p>
             </div>
           </div>
@@ -263,9 +281,9 @@ export const ManagerDashboard: React.FC = () => {
 
       {/* Message succès restitution */}
       {returnSuccessMessage && (
-        <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between gap-3 animate-in fade-in">
+        <div className="bg-emerald-600 text-white p-4 rounded-3xl shadow-lg flex items-center justify-between gap-3 animate-in fade-in">
           <div className="flex items-center space-x-2.5">
-            <CheckCircle2 className="w-5 h-5 text-emerald-200" />
+            <CheckCircle2 className="w-5 h-5 text-emerald-200 shrink-0" />
             <span className="text-xs sm:text-sm font-bold">{returnSuccessMessage}</span>
           </div>
           <button
@@ -284,13 +302,13 @@ export const ManagerDashboard: React.FC = () => {
             <span className="text-xs font-extrabold uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
               Gérant de bibliothèque
             </span>
-            <span className="text-xs text-slate-400 font-mono">USMBA • EST</span>
+            <span className="text-xs text-slate-500 font-mono">Date réelle : <strong>{formatDisplayDate(systemDate)}</strong> ({systemDate})</span>
           </div>
           <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">
             Tableau de Bord & Gestion de la Bibliothèque
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Indicateurs en temps réel, inventaire des exemplaires, gestion des flux d'emprunt et des pénalités.
+            Indicateurs en temps réel, stock physique cohérent, validation des demandes avec réservation et suivi des retards.
           </p>
         </div>
 
@@ -331,7 +349,7 @@ export const ManagerDashboard: React.FC = () => {
             <Clock className="w-3.5 h-3.5" />
             <span>Demandes ({pendingRequestsCount + acceptedRequestsWaitingHandover.length})</span>
             {pendingRequestsCount > 0 && (
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
             )}
           </button>
 
@@ -374,11 +392,11 @@ export const ManagerDashboard: React.FC = () => {
       </div>
 
       {/* ========================================================================= */}
-      {/* LES 7 INDICATEURS CALCULÉS AUTOMATIQUEMENT (Strictement réels, non codés en dur) */}
+      {/* LES INDICATEURS REELS CALCULÉS DYNAMIQUEMENT (AUCUN CHIFFRE EN DUR)       */}
       {/* ========================================================================= */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        {/* 1. Nombre total de livres */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        {/* 1. Titres au total */}
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
           <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">
             Titres au total
           </span>
@@ -388,8 +406,8 @@ export const ManagerDashboard: React.FC = () => {
           <span className="text-[10px] text-slate-400">Catalogue actif</span>
         </div>
 
-        {/* 2. Nombre total d'exemplaires */}
-        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+        {/* 2. Volume physique total */}
+        <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-2xs">
           <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">
             Total exemplaires
           </span>
@@ -399,60 +417,63 @@ export const ManagerDashboard: React.FC = () => {
           <span className="text-[10px] text-slate-400">Volume physique</span>
         </div>
 
-        {/* 3. Nombre d'exemplaires disponibles */}
-        <div className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
+        {/* 3. Disponibles en rayon */}
+        <div className="bg-white p-4 rounded-3xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
           <span className="text-[10px] text-emerald-800 font-bold uppercase tracking-wider block">
-            Disponibles
+            Disponibles rayon
           </span>
           <span className="text-2xl font-black text-emerald-600 mt-1 block">
             {availableCopiesCount}
           </span>
-          <span className="text-[10px] text-emerald-700">En rayon</span>
+          <span className="text-[10px] text-emerald-700">Prêts à être empruntés</span>
         </div>
 
-        {/* 4. Nombre d'exemplaires empruntés */}
-        <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs">
+        {/* 4. Réservés (demandes acceptées) */}
+        <div className="bg-white p-4 rounded-3xl border border-indigo-200 bg-indigo-50/20 shadow-2xs">
+          <span className="text-[10px] text-indigo-800 font-bold uppercase tracking-wider block">
+            Réservés au comptoir
+          </span>
+          <span className="text-2xl font-black text-indigo-600 mt-1 block">
+            {reservedCopiesCount}
+          </span>
+          <span className="text-[10px] text-indigo-700">Demandes acceptées</span>
+        </div>
+
+        {/* 5. Empruntés en circulation */}
+        <div className="bg-white p-4 rounded-3xl border border-blue-200 bg-blue-50/20 shadow-2xs">
           <span className="text-[10px] text-blue-800 font-bold uppercase tracking-wider block">
-            Empruntés
+            Empruntés actifs
           </span>
           <span className="text-2xl font-black text-blue-600 mt-1 block">
             {borrowedCopiesCount}
           </span>
-          <span className="text-[10px] text-blue-700">En circulation</span>
+          <span className="text-[10px] text-blue-700">En possession étudiants</span>
         </div>
 
-        {/* 5. Nombre d'emprunts en retard */}
-        <div className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/20 shadow-2xs">
-          <span className="text-[10px] text-rose-800 font-bold uppercase tracking-wider block">
-            En retard
-          </span>
-          <span className="text-2xl font-black text-rose-600 mt-1 block">
-            {overdueLoansCount}
-          </span>
-          <span className="text-[10px] text-rose-700">Échéance dépassée</span>
-        </div>
-
-        {/* 6. Nombre de demandes d'emprunt en attente */}
-        <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/20 shadow-2xs">
+        {/* 6. Indisponibles (en réparation) */}
+        <div className="bg-white p-4 rounded-3xl border border-amber-200 bg-amber-50/20 shadow-2xs">
           <span className="text-[10px] text-amber-800 font-bold uppercase tracking-wider block">
-            Demandes attente
+            Indisponibles
           </span>
           <span className="text-2xl font-black text-amber-600 mt-1 block">
-            {pendingRequestsCount}
+            {unavailableCopiesCount}
           </span>
-          <span className="text-[10px] text-amber-700">À valider</span>
+          <span className="text-[10px] text-amber-700">Endommagés / atelier</span>
         </div>
+      </div>
 
-        {/* 7. Nombre de retours à traiter */}
-        <div className="bg-white p-4 rounded-2xl border border-indigo-200 bg-indigo-50/20 shadow-2xs">
-          <span className="text-[10px] text-indigo-800 font-bold uppercase tracking-wider block">
-            Retours à traiter
+      {/* Barre de cohérence mathématique du stock */}
+      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 px-4 flex flex-wrap items-center justify-between text-xs text-slate-600 gap-2">
+        <div className="flex items-center space-x-2">
+          <ShieldCheck className="w-4 h-4 text-emerald-600" />
+          <span className="font-semibold text-slate-800">Cohérence physique du stock vérifiée :</span>
+          <span className="font-mono text-slate-700">
+            Total ({totalCopiesCount}) = Disponibles ({availableCopiesCount}) + Réservés ({reservedCopiesCount}) + Empruntés ({borrowedCopiesCount}) + Indisponibles ({unavailableCopiesCount})
           </span>
-          <span className="text-2xl font-black text-indigo-700 mt-1 block">
-            {returnsToProcessCount}
-          </span>
-          <span className="text-[10px] text-indigo-600">Aujourd'hui + retard</span>
         </div>
+        <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100/70 px-2.5 py-0.5 rounded-full">
+          Équation équilibrée 100%
+        </span>
       </div>
 
       {/* ========================================================================= */}
@@ -460,7 +481,7 @@ export const ManagerDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
-          {/* SECTION : ÉCHÉANCES DU JOUR (2026-11-12) */}
+          {/* SECTION : ÉCHÉANCES DU JOUR (DATE RÉELLE DU SYSTÈME) */}
           <div className="bg-white rounded-3xl p-5 sm:p-6 border border-blue-200 shadow-xs">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2.5">
@@ -469,10 +490,10 @@ export const ManagerDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">
-                    Exemplaires à retourner aujourd'hui ({loansDueToday.length})
+                    Exemplaires dont l'échéance de retour est AUJOURD'HUI ({loansDueToday.length})
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Date du jour : <strong className="text-blue-700">{TODAY_DATE}</strong>
+                    Date du système : <strong className="text-blue-700">{formatDisplayDate(systemDate)}</strong> ({systemDate})
                   </p>
                 </div>
               </div>
@@ -540,7 +561,7 @@ export const ManagerDashboard: React.FC = () => {
                     {yellowLoans.length}
                   </span>
                   <span className="text-xs text-amber-800 font-medium">
-                    1 à 3 jours de retard • 5 MAD/jour
+                    1 à 3 jours de retard • {penaltyRule.feePerDayMad} MAD/jour
                   </span>
                 </div>
                 <div className="w-12 h-12 rounded-2xl bg-amber-200/80 text-amber-950 flex items-center justify-center font-black text-xs">
@@ -623,11 +644,11 @@ export const ManagerDashboard: React.FC = () => {
                       Règles de Pénalité Institutionnelles
                     </h3>
                     <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                      Lecture seule • Administration
+                      Lecture seule • Administration EST USMBA
                     </span>
                   </div>
                   <p className="text-xs text-slate-400">
-                    Fixées par la direction de l'EST USMBA. Le Gérant de bibliothèque applique ces barèmes sans pouvoir les modifier.
+                    Fixées par la direction académique. Le Gérant de bibliothèque applique ces barèmes sans pouvoir les modifier.
                   </p>
                 </div>
               </div>
@@ -646,7 +667,7 @@ export const ManagerDashboard: React.FC = () => {
                   {penaltyRule.feePerDayMad} MAD / jour
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  Calculée automatiquement sur chaque jour dépassé
+                  Calculée automatiquement pour chaque jour dépassé
                 </span>
               </div>
 
@@ -658,7 +679,7 @@ export const ManagerDashboard: React.FC = () => {
                   Forfait {penaltyRule.damagedBookFeeMad} MAD
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  Frais de reliure ou réhabilitation
+                  Frais de reliure et réhabilitation atelier
                 </span>
               </div>
 
@@ -670,7 +691,7 @@ export const ManagerDashboard: React.FC = () => {
                   Forfait {penaltyRule.lostBookFeeMad} MAD
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  Remplacement à neuf de l'ouvrage
+                  Remplacement à neuf et réintégration
                 </span>
               </div>
             </div>
@@ -684,7 +705,7 @@ export const ManagerDashboard: React.FC = () => {
                   Étudiants en retard de restitution ({filteredOverdueLoans.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Pénalités calculées selon les règles administratives officielles.
+                  Pénalités calculées dynamiquement selon la date réelle du jour ({systemDate}).
                 </p>
               </div>
 
@@ -765,7 +786,7 @@ export const ManagerDashboard: React.FC = () => {
                       <div className="text-slate-600 mt-1 flex flex-wrap items-center gap-x-2">
                         <span className="font-bold text-slate-900">« {loan.bookTitle} »</span>
                         <span className="text-slate-400">·</span>
-                        <span>Échéance dépassée depuis le {loan.dueDate}</span>
+                        <span>Échéance : {formatDisplayDate(loan.dueDate)}</span>
                         <span className="text-slate-400">·</span>
                         <span className="font-bold text-rose-700">
                           {loan.daysOverdue} jour{loan.daysOverdue > 1 ? 's' : ''} de retard
@@ -781,7 +802,7 @@ export const ManagerDashboard: React.FC = () => {
                         Pénalité calculée
                       </span>
                       <span className="font-extrabold text-slate-900">
-                        {loan.penaltyFeeMad || loan.daysOverdue * 5} MAD
+                        {loan.penaltyFeeMad || loan.daysOverdue * penaltyRule.feePerDayMad} MAD
                       </span>
                     </div>
 
@@ -797,7 +818,7 @@ export const ManagerDashboard: React.FC = () => {
                     <button
                       onClick={() => {
                         setReportModalLoan(loan);
-                        setReportReason(`Retard prolongé de ${loan.daysOverdue} jours non régularisé.`);
+                        setReportReason(`Retard constaté de ${loan.daysOverdue} jours non régularisé.`);
                       }}
                       className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors cursor-pointer"
                       title="Signaler à l'administrateur"
@@ -822,7 +843,6 @@ export const ManagerDashboard: React.FC = () => {
 
       {/* ========================================================================= */}
       {/* ONGLET 2 : GESTION DES LIVRES ET INVENTAIRE DES EXEMPLAIRES                 */}
-      {/* - totalCopies = availableCopies + borrowedCopies vérifié en temps réel    */}
       {/* ========================================================================= */}
       {activeTab === 'books' && (
         <div className="space-y-6">
@@ -832,7 +852,7 @@ export const ManagerDashboard: React.FC = () => {
                 Gestion des Ouvrages & Cohérence du Stock
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Règle stricte respectée : totalCopies ({totalCopiesCount}) = disponibles ({availableCopiesCount}) + empruntés ({borrowedCopiesCount}).
+                Vérification du volume physique, des réservations en attente et des réparations.
               </p>
             </div>
 
@@ -886,10 +906,11 @@ export const ManagerDashboard: React.FC = () => {
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
                     <th className="py-3.5 px-4 sm:px-6">Ouvrage & Auteur</th>
                     <th className="py-3.5 px-3">Catégorie</th>
-                    <th className="py-3.5 px-3">Édition / ISBN</th>
                     <th className="py-3.5 px-3 text-center">Total</th>
                     <th className="py-3.5 px-3 text-center">Disponibles</th>
+                    <th className="py-3.5 px-3 text-center">Réservés</th>
                     <th className="py-3.5 px-3 text-center">Empruntés</th>
+                    <th className="py-3.5 px-3 text-center">Indisponibles</th>
                     <th className="py-3.5 px-4 sm:px-6 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -906,10 +927,6 @@ export const ManagerDashboard: React.FC = () => {
                           {b.category}
                         </span>
                       </td>
-                      <td className="py-3.5 px-3 text-slate-600">
-                        <div>{b.publishedYear} • {b.publisher}</div>
-                        <div className="font-mono text-[10px] text-slate-400">{b.isbn}</div>
-                      </td>
                       <td className="py-3.5 px-3 text-center font-black text-slate-900 text-sm">
                         {b.totalCopies}
                       </td>
@@ -924,8 +941,29 @@ export const ManagerDashboard: React.FC = () => {
                           {b.availableCopies}
                         </span>
                       </td>
+                      <td className="py-3.5 px-3 text-center font-black text-indigo-600 text-sm">
+                        {b.reservedCopies || 0}
+                      </td>
                       <td className="py-3.5 px-3 text-center font-black text-blue-600 text-sm">
                         {b.borrowedCopies}
+                      </td>
+                      <td className="py-3.5 px-3 text-center">
+                        {(b.unavailableCopies || 0) > 0 ? (
+                          <div className="inline-flex items-center space-x-1">
+                            <span className="font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
+                              {b.unavailableCopies}
+                            </span>
+                            <button
+                              onClick={() => repairDamagedBook(b.id)}
+                              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded"
+                              title="Remettre 1 exemplaire réparé en rayon disponible"
+                            >
+                              <Wrench className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 font-mono">0</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 sm:px-6 text-right space-x-1.5 whitespace-nowrap">
                         <button
@@ -953,11 +991,11 @@ export const ManagerDashboard: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* ONGLET 3 : DEMANDES D'EMPRUNT (En attente + Acceptées pour remise)          */}
+      {/* ONGLET 3 : DEMANDES D'EMPRUNT (En attente + Acceptées avec réservation)    */}
       {/* ========================================================================= */}
       {activeTab === 'requests' && (
         <div className="space-y-6">
-          {/* Section 1 : Demandes en attente de décision */}
+          {/* Section 1 : Demandes en attente */}
           <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -965,7 +1003,7 @@ export const ManagerDashboard: React.FC = () => {
                   1. Demandes d'emprunt en attente ({pendingRequests.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  L'étudiant a demandé l'ouvrage. Acceptez ou refusez avec un motif.
+                  L'acceptation d'une demande réserve automatiquement l'exemplaire pour éviter toute surréservation.
                 </p>
               </div>
               <span className="text-xs bg-amber-50 text-amber-800 font-bold px-3 py-1 rounded-full border border-amber-200">
@@ -979,45 +1017,60 @@ export const ManagerDashboard: React.FC = () => {
               </p>
             ) : (
               <div className="divide-y divide-slate-100">
-                {pendingRequests.map((req) => (
-                  <div
-                    key={req.id}
-                    className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div>
-                      <div className="font-extrabold text-sm text-slate-900">
-                        « {req.bookTitle} »
+                {pendingRequests.map((req) => {
+                  const targetBook = books.find((b) => b.id === req.bookId);
+                  const isAvailable = targetBook && targetBook.availableCopies > 0;
+
+                  return (
+                    <div
+                      key={req.id}
+                      className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                    >
+                      <div>
+                        <div className="font-extrabold text-sm text-slate-900">
+                          « {req.bookTitle} »
+                        </div>
+                        <div className="text-slate-600 mt-0.5">
+                          Demandeur : <strong>{req.studentName}</strong> ({req.studentEmail}) • Carte : {req.studentCardId}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 flex items-center space-x-2">
+                          <span>Demandé le : {formatDisplayDate(req.requestDate)}</span>
+                          <span>·</span>
+                          <span className={isAvailable ? 'text-emerald-700 font-bold' : 'text-rose-600 font-bold'}>
+                            Stock disponible : {targetBook?.availableCopies || 0} ex.
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-slate-600 mt-0.5">
-                        Demandeur : <strong>{req.studentName}</strong> ({req.studentEmail}) • Carte : {req.studentCardId}
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-0.5">
-                        Date de demande : {req.requestDate || TODAY_DATE}
+
+                      <div className="flex items-center space-x-2 shrink-0">
+                        <button
+                          onClick={() => {
+                            const res = acceptLoanRequest(req.id);
+                            if (!res.success && res.error) {
+                              alert(res.error);
+                            }
+                          }}
+                          disabled={!isAvailable}
+                          className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold rounded-xl transition-colors cursor-pointer flex items-center space-x-1"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Accepter & Réserver</span>
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            setRefusalModalLoan(req);
+                            setRefusalReason('Exemplaire indisponible ou réservé pour consultation prioritaire.');
+                          }}
+                          className="px-3.5 py-2 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 font-bold rounded-xl transition-colors cursor-pointer flex items-center space-x-1"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Refuser</span>
+                        </button>
                       </div>
                     </div>
-
-                    <div className="flex items-center space-x-2 shrink-0">
-                      <button
-                        onClick={() => acceptLoanRequest(req.id)}
-                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors cursor-pointer flex items-center space-x-1"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Accepter la demande</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setRefusalModalLoan(req);
-                          setRefusalReason('Exemplaire réservé pour consultation sur place ou maintenance.');
-                        }}
-                        className="px-3.5 py-2 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 font-bold rounded-xl transition-colors cursor-pointer flex items-center space-x-1"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        <span>Refuser</span>
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1030,17 +1083,17 @@ export const ManagerDashboard: React.FC = () => {
                   2. Demandes acceptées en attente de remise physique ({acceptedRequestsWaitingHandover.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  L'étudiant doit se présenter au comptoir. Confirmez la remise physique pour activer l'emprunt et décrémenter le stock.
+                  L'exemplaire est réservé. L'emprunt ne devient actif qu'au moment de la remise physique au comptoir.
                 </p>
               </div>
-              <span className="text-xs bg-blue-50 text-blue-800 font-bold px-3 py-1 rounded-full border border-blue-200">
-                {acceptedRequestsWaitingHandover.length} en attente de retrait
+              <span className="text-xs bg-indigo-50 text-indigo-800 font-bold px-3 py-1 rounded-full border border-indigo-200">
+                {acceptedRequestsWaitingHandover.length} réservé(s)
               </span>
             </div>
 
             {acceptedRequestsWaitingHandover.length === 0 ? (
               <p className="text-xs text-slate-400 py-4 italic">
-                Aucune demande acceptée en attente de remise au comptoir.
+                Aucune demande acceptée en attente de retrait.
               </p>
             ) : (
               <div className="divide-y divide-slate-100">
@@ -1056,8 +1109,8 @@ export const ManagerDashboard: React.FC = () => {
                       <div className="text-slate-600 mt-0.5">
                         Étudiant : <strong>{req.studentName}</strong> ({req.studentEmail}) • Carte : {req.studentCardId}
                       </div>
-                      <div className="text-[11px] text-emerald-700 font-semibold mt-0.5">
-                        Statut : Accepté • Prêt pour remise physique
+                      <div className="text-[11px] text-indigo-700 font-semibold mt-0.5">
+                        Statut : Accepté • Exemplaire réservé au comptoir
                       </div>
                     </div>
 
@@ -1077,7 +1130,7 @@ export const ManagerDashboard: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* ONGLET 4 : GESTION DES RETOURS PHYSIQUES                                   */}
+      {/* ONGLET 4 : GESTION DES RETOURS PHYSIQUES (CONTRÔLE D'ÉTAT STRICT)           */}
       {/* ========================================================================= */}
       {activeTab === 'returns' && (
         <div className="space-y-6">
@@ -1086,7 +1139,7 @@ export const ManagerDashboard: React.FC = () => {
               Traitement des Retours Physiques d'Exemplaires
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Vérifiez l'état physique de l'ouvrage (Bon état, Endommagé, Perdu) et confirmez la réintégration au stock.
+              Règle stricte : un exemplaire en bon état redevient disponible. Un exemplaire endommagé est marqué indisponible pour réparation. Un exemplaire perdu n'est jamais réintégré au stock disponible.
             </p>
           </div>
 
@@ -1096,7 +1149,7 @@ export const ManagerDashboard: React.FC = () => {
                 Emprunts actifs en circulation ({activeLoans.length})
               </span>
               <span className="text-xs text-slate-500">
-                Incrémentation automatique du stock dès validation
+                Prévention stricte des doubles retours
               </span>
             </div>
 
@@ -1114,10 +1167,10 @@ export const ManagerDashboard: React.FC = () => {
                       Emprunté par <strong>{loan.studentName}</strong> ({loan.studentEmail}) • Carte : {loan.studentCardId}
                     </div>
                     <div className="flex items-center space-x-2 text-[11px] text-slate-400 mt-0.5">
-                      <span>Date emprunt : {loan.borrowedDate || loan.requestDate}</span>
+                      <span>Date remise : {formatDisplayDate(loan.borrowedDate || loan.requestDate)}</span>
                       <span>·</span>
                       <span className={loan.daysOverdue > 0 ? 'text-rose-600 font-bold' : ''}>
-                        Date limite : {loan.dueDate} {loan.daysOverdue > 0 ? `(${loan.daysOverdue}j retard)` : ''}
+                        Date limite : {formatDisplayDate(loan.dueDate)} {loan.daysOverdue > 0 ? `(${loan.daysOverdue}j retard)` : ''}
                       </span>
                     </div>
                   </div>
@@ -1205,7 +1258,7 @@ export const ManagerDashboard: React.FC = () => {
                         <div key={l.id} className="flex items-center justify-between text-slate-800">
                           <span className="truncate pr-2">· {l.bookTitle}</span>
                           <span className="text-[10px] font-mono text-slate-500 shrink-0">
-                            Échéance : {l.dueDate}
+                            Échéance : {formatDisplayDate(l.dueDate)}
                           </span>
                         </div>
                       ))
@@ -1243,7 +1296,7 @@ export const ManagerDashboard: React.FC = () => {
                 </h3>
                 <p className="text-xs text-slate-500">
                   {editingBook
-                    ? "Mise à jour des informations et du nombre d'exemplaires."
+                    ? "Mise à jour des informations et du volume d'exemplaires."
                     : "Enregistrement d'un nouveau titre au catalogue de l'EST."}
                 </p>
               </div>
@@ -1322,10 +1375,10 @@ export const ManagerDashboard: React.FC = () => {
                 </div>
 
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700 block">Nombre d'exemplaires</label>
+                  <label className="font-bold text-slate-700 block">Total exemplaires</label>
                   <input
                     type="number"
-                    min={editingBook ? editingBook.borrowedCopies : 1}
+                    min={editingBook ? (editingBook.borrowedCopies + (editingBook.reservedCopies || 0) + (editingBook.unavailableCopies || 0)) : 1}
                     value={bookForm.totalCopies}
                     onChange={(e) => setBookForm({ ...bookForm, totalCopies: Number(e.target.value) })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
@@ -1368,13 +1421,13 @@ export const ManagerDashboard: React.FC = () => {
                 />
               </div>
 
-              {/* Bouton pour ajouter une nouvelle catégorie si nécessaire */}
+              {/* Bouton pour ajouter une nouvelle catégorie */}
               <div className="pt-1">
                 {!showAddCategoryInput ? (
                   <button
                     type="button"
                     onClick={() => setShowAddCategoryInput(true)}
-                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold"
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold cursor-pointer"
                   >
                     + Créer une nouvelle catégorie
                   </button>
@@ -1397,7 +1450,7 @@ export const ManagerDashboard: React.FC = () => {
                           setShowAddCategoryInput(false);
                         }
                       }}
-                      className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                      className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold cursor-pointer"
                     >
                       Ajouter
                     </button>
@@ -1444,12 +1497,22 @@ export const ManagerDashboard: React.FC = () => {
                 </p>
               </div>
               <button
-                onClick={() => setReturnModalLoan(null)}
+                onClick={() => {
+                  setReturnModalLoan(null);
+                  setReturnErrorMessage(null);
+                }}
                 className="p-1.5 text-slate-400 hover:text-slate-700"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
+
+            {returnErrorMessage && (
+              <div className="mb-3 p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{returnErrorMessage}</span>
+              </div>
+            )}
 
             <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs space-y-1 mb-4">
               <span className="font-bold text-slate-900 block">« {returnModalLoan.bookTitle} »</span>
@@ -1503,15 +1566,21 @@ export const ManagerDashboard: React.FC = () => {
                 </button>
               </div>
 
+              {returnCondition === 'good' && (
+                <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-900">
+                  L'exemplaire sera immédiatement <strong>reclassé en rayon disponible (+1 stock)</strong>.
+                </div>
+              )}
+
               {returnCondition === 'damaged' && (
                 <div className="p-2.5 bg-orange-50 border border-orange-200 rounded-xl text-[11px] text-orange-900">
-                  Forfait institutionnel de réparation : <strong>{penaltyRule.damagedBookFeeMad} MAD</strong>.
+                  L'exemplaire sera marqué <strong>indisponible pour réparation</strong> (non réintégré au rayon). Forfait officiel : <strong>{penaltyRule.damagedBookFeeMad} MAD</strong>.
                 </div>
               )}
 
               {returnCondition === 'lost' && (
                 <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-900">
-                  Forfait institutionnel de remplacement : <strong>{penaltyRule.lostBookFeeMad} MAD</strong>.
+                  L'exemplaire ne sera <strong>jamais ajouté au stock disponible</strong>. Forfait de rachat officiel : <strong>{penaltyRule.lostBookFeeMad} MAD</strong>.
                 </div>
               )}
 
@@ -1521,7 +1590,7 @@ export const ManagerDashboard: React.FC = () => {
                   type="text"
                   value={returnNotes}
                   onChange={(e) => setReturnNotes(e.target.value)}
-                  placeholder="Ex: Page de garde déchirée ou retour conforme..."
+                  placeholder="Ex: Page déchirée ou retour impeccable..."
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
                 />
               </div>

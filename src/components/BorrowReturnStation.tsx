@@ -13,8 +13,10 @@ import {
   PackageCheck,
   Layers,
   ArrowRight,
+  ScanLine,
+  Sparkles,
 } from 'lucide-react';
-import { QRCodeView } from './QRCodeView';
+import jsQR from 'jsqr';
 
 export const BorrowReturnStation: React.FC = () => {
   const {
@@ -37,26 +39,33 @@ export const BorrowReturnStation: React.FC = () => {
 
   const [useCamera, setUseCamera] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [decodedQrMessage, setDecodedQrMessage] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const scanLoopRef = useRef<number | null>(null);
+  const lastScannedCodeRef = useRef<string>('');
+  const lastScannedTimeRef = useRef<number>(0);
 
   // Saisie manuelle de secours
   const [manualCode, setManualCode] = useState('');
 
-  // Gestion de la caméra
+  // Gestion de la caméra et boucle d'analyse vidéo en temps réel via jsQR
   useEffect(() => {
     if (useCamera) {
       navigator.mediaDevices
-        ?.getUserMedia({ video: { facingMode: 'environment' } })
+        ?.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } } })
         .then((stream) => {
           streamRef.current = stream;
           if (videoRef.current) {
             videoRef.current.srcObject = stream;
+            videoRef.current.setAttribute('playsinline', 'true');
+            videoRef.current.play().catch(console.error);
           }
         })
         .catch((err) => {
           console.error(err);
-          setCameraError("Impossible d'accéder à la caméra de l'appareil.");
+          setCameraError("Impossible d'accéder à la caméra de l'appareil (vérifiez les autorisations de votre navigateur).");
           setUseCamera(false);
         });
     } else {
@@ -64,14 +73,92 @@ export const BorrowReturnStation: React.FC = () => {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
       }
+      if (scanLoopRef.current) {
+        cancelAnimationFrame(scanLoopRef.current);
+        scanLoopRef.current = null;
+      }
     }
 
     return () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
       }
+      if (scanLoopRef.current) {
+        cancelAnimationFrame(scanLoopRef.current);
+      }
     };
   }, [useCamera]);
+
+  // Boucle de décodage des trames vidéo via jsQR
+  useEffect(() => {
+    if (!useCamera) return;
+
+    let isScanning = true;
+
+    const scanVideoFrame = () => {
+      if (!isScanning) return;
+
+      const video = videoRef.current;
+      if (video && video.readyState === video.HAVE_ENOUGH_DATA) {
+        if (!canvasRef.current) {
+          canvasRef.current = document.createElement('canvas');
+        }
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        if (ctx) {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'dontInvert',
+          });
+
+          if (code && code.data) {
+            const rawCode = code.data.trim();
+            const now = Date.now();
+
+            // Éviter les détections en double à haute fréquence (< 2 secondes)
+            if (rawCode !== lastScannedCodeRef.current || now - lastScannedTimeRef.current > 2000) {
+              lastScannedCodeRef.current = rawCode;
+              lastScannedTimeRef.current = now;
+
+              setDecodedQrMessage(`Code détecté : ${rawCode}`);
+              setTimeout(() => setDecodedQrMessage(null), 3000);
+
+              // Traitement de l'opération en fonction du mode actif
+              if (activeStationMode === 'borrow') {
+                if (!scanBorrowState.scannedBook) {
+                  processBorrowBookScan(rawCode);
+                } else {
+                  processBorrowStudentScan(rawCode);
+                }
+              } else {
+                if (!scanReturnState.scannedBook) {
+                  processReturnBookScan(rawCode);
+                } else {
+                  processReturnStudentScan(rawCode);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      scanLoopRef.current = requestAnimationFrame(scanVideoFrame);
+    };
+
+    scanLoopRef.current = requestAnimationFrame(scanVideoFrame);
+
+    return () => {
+      isScanning = false;
+      if (scanLoopRef.current) {
+        cancelAnimationFrame(scanLoopRef.current);
+      }
+    };
+  }, [useCamera, activeStationMode, scanBorrowState.scannedBook, scanReturnState.scannedBook]);
 
   // Soumission manuelle
   const handleManualSubmit = (e: React.FormEvent) => {
@@ -100,24 +187,29 @@ export const BorrowReturnStation: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Station Mode Switcher (Emprunt vs Retour automatique de livre) */}
-      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">
-            Poste de Scan Automatique QR Code
-          </h3>
+          <div className="flex items-center space-x-2">
+            <h3 className="text-lg font-extrabold text-slate-900 tracking-tight">
+              Poste de Scan Automatique QR Code
+            </h3>
+            <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+              Décodage jsQR en direct
+            </span>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Sélectionnez l'opération : octroi d'un exemplaire ou restitution immédiate sans clic au stock.
+            Décodage caméra instantané ou saisie manuelle : octroi d'un exemplaire ou restitution immédiate sans clic.
           </p>
         </div>
 
-        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+        <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200 shrink-0">
           <button
             onClick={() => {
               setActiveStationMode('borrow');
               resetBorrowScan();
               resetReturnScan();
             }}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               activeStationMode === 'borrow'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -133,7 +225,7 @@ export const BorrowReturnStation: React.FC = () => {
               resetBorrowScan();
               resetReturnScan();
             }}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               activeStationMode === 'return'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -151,7 +243,7 @@ export const BorrowReturnStation: React.FC = () => {
       {activeStationMode === 'borrow' && (
         <div className="space-y-6">
           {/* Timeline d'emprunt */}
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+          <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h4 className="text-sm font-bold text-slate-900">
@@ -163,7 +255,7 @@ export const BorrowReturnStation: React.FC = () => {
               </div>
               <button
                 onClick={resetBorrowScan}
-                className="text-xs text-slate-500 hover:text-slate-800 flex items-center space-x-1 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                className="text-xs text-slate-500 hover:text-slate-800 flex items-center space-x-1 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>Réinitialiser</span>
@@ -172,7 +264,7 @@ export const BorrowReturnStation: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div
-                className={`p-3.5 rounded-xl border transition-all ${
+                className={`p-3.5 rounded-2xl border transition-all ${
                   currentBorrowStep === 1
                     ? 'bg-blue-50/80 border-blue-400 ring-2 ring-blue-500/10'
                     : scanBorrowState.scannedBook
@@ -196,7 +288,7 @@ export const BorrowReturnStation: React.FC = () => {
                     <span className="text-xs font-bold text-slate-900 block">
                       1. Scan QR Livre
                     </span>
-                    <span className="text-[11px] text-slate-500">
+                    <span className="text-[11px] text-slate-500 truncate block max-w-44">
                       {scanBorrowState.scannedBook ? scanBorrowState.scannedBook.title : "Scanner l'exemplaire"}
                     </span>
                   </div>
@@ -204,7 +296,7 @@ export const BorrowReturnStation: React.FC = () => {
               </div>
 
               <div
-                className={`p-3.5 rounded-xl border transition-all ${
+                className={`p-3.5 rounded-2xl border transition-all ${
                   currentBorrowStep === 2
                     ? 'bg-blue-50/80 border-blue-400 ring-2 ring-blue-500/10 animate-pulse'
                     : 'bg-slate-50 border-slate-200 opacity-60'
@@ -223,14 +315,14 @@ export const BorrowReturnStation: React.FC = () => {
                       2. Scan Carte Étudiant
                     </span>
                     <span className="text-[11px] text-slate-500">
-                      Vérifie la limite de 3 livres
+                      Vérifie la limite stricte de 3 livres
                     </span>
                   </div>
                 </div>
               </div>
 
               <div
-                className={`p-3.5 rounded-xl border transition-all ${
+                className={`p-3.5 rounded-2xl border transition-all ${
                   scanBorrowState.successLoan
                     ? 'bg-emerald-50 border-emerald-400 ring-2 ring-emerald-500/10'
                     : 'bg-slate-50 border-slate-200 opacity-60'
@@ -259,7 +351,7 @@ export const BorrowReturnStation: React.FC = () => {
 
           {/* Erreur Emprunt */}
           {scanBorrowState.error && (
-            <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 text-rose-900 shadow-xs flex items-start space-x-3">
+            <div className="bg-rose-50 border-2 border-rose-300 rounded-3xl p-4 text-rose-900 shadow-xs flex items-start space-x-3">
               <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <h4 className="text-sm font-bold text-rose-950">Refus ou Erreur de Scan</h4>
@@ -278,7 +370,7 @@ export const BorrowReturnStation: React.FC = () => {
 
           {/* Succès Emprunt & Bouton d'annulation en cas d'erreur */}
           {scanBorrowState.successLoan && (
-            <div className="bg-emerald-50 border-2 border-emerald-300 rounded-2xl p-5 text-emerald-950 shadow-md">
+            <div className="bg-emerald-50 border-2 border-emerald-300 rounded-3xl p-5 text-emerald-950 shadow-md">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-start space-x-3">
                   <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
@@ -310,7 +402,7 @@ export const BorrowReturnStation: React.FC = () => {
           )}
 
           {scanBorrowState.lastCancelledLoan && (
-            <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 text-xs text-amber-900 flex items-center space-x-2">
+            <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3.5 text-xs text-amber-900 flex items-center space-x-2">
               <Undo2 className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
                 L'emprunt <strong>{scanBorrowState.lastCancelledLoan.id}</strong> a été annulé avec succès. L'exemplaire a été réintégré au stock.
@@ -325,7 +417,7 @@ export const BorrowReturnStation: React.FC = () => {
       {/* ========================================================================= */}
       {activeStationMode === 'return' && (
         <div className="space-y-6">
-          <div className="bg-emerald-50/70 rounded-2xl p-5 border border-emerald-200 shadow-xs">
+          <div className="bg-emerald-50/70 rounded-3xl p-5 border border-emerald-200 shadow-xs">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <div className="flex items-center space-x-2">
@@ -340,7 +432,7 @@ export const BorrowReturnStation: React.FC = () => {
               </div>
               <button
                 onClick={resetReturnScan}
-                className="text-xs text-emerald-700 hover:text-emerald-900 flex items-center space-x-1 bg-white border border-emerald-300 px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                className="text-xs text-emerald-700 hover:text-emerald-900 flex items-center space-x-1 bg-white border border-emerald-300 px-3 py-1.5 rounded-xl transition-colors cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 <span>Réinitialiser</span>
@@ -349,7 +441,7 @@ export const BorrowReturnStation: React.FC = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div
-                className={`p-3.5 rounded-xl border transition-all ${
+                className={`p-3.5 rounded-2xl border transition-all ${
                   currentReturnStep === 1
                     ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/20'
                     : scanReturnState.scannedBook
@@ -369,7 +461,7 @@ export const BorrowReturnStation: React.FC = () => {
                     <span className="text-xs font-bold text-slate-900 block">
                       Étape 1 : Scanner le QR de l'ouvrage retourné
                     </span>
-                    <span className="text-[11px] text-slate-500">
+                    <span className="text-[11px] text-slate-500 truncate block max-w-56">
                       {scanReturnState.scannedBook ? scanReturnState.scannedBook.title : 'En attente de scan du livre...'}
                     </span>
                   </div>
@@ -377,7 +469,7 @@ export const BorrowReturnStation: React.FC = () => {
               </div>
 
               <div
-                className={`p-3.5 rounded-xl border transition-all ${
+                className={`p-3.5 rounded-2xl border transition-all ${
                   currentReturnStep === 2
                     ? 'bg-white border-emerald-500 ring-2 ring-emerald-500/20 animate-pulse'
                     : 'bg-white/60 border-emerald-200 opacity-70'
@@ -402,7 +494,7 @@ export const BorrowReturnStation: React.FC = () => {
 
           {/* Erreur Retour */}
           {scanReturnState.error && (
-            <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 text-rose-900 shadow-xs flex items-start space-x-3">
+            <div className="bg-rose-50 border-2 border-rose-300 rounded-3xl p-4 text-rose-900 shadow-xs flex items-start space-x-3">
               <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               <div className="flex-1">
                 <h4 className="text-sm font-bold text-rose-950">Erreur lors de la restitution</h4>
@@ -421,7 +513,7 @@ export const BorrowReturnStation: React.FC = () => {
 
           {/* SUCCÈS RETOUR AUTOMATIQUE (STOCK +1) */}
           {scanReturnState.successReturn && (
-            <div className="bg-emerald-600 text-white rounded-2xl p-5 shadow-lg animate-in fade-in slide-in-from-top duration-300">
+            <div className="bg-emerald-600 text-white rounded-3xl p-5 shadow-lg animate-in fade-in slide-in-from-top duration-300">
               <div className="flex items-start space-x-3.5">
                 <div className="w-10 h-10 rounded-full bg-white text-emerald-700 flex items-center justify-center font-bold shrink-0">
                   <CheckCircle2 className="w-6 h-6" />
@@ -435,10 +527,10 @@ export const BorrowReturnStation: React.FC = () => {
                   </h4>
                   <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-emerald-100">
                     <span className="bg-emerald-700 px-2.5 py-1 rounded-lg">
-                      Exemplaire remis au rayon : {scanReturnState.successReturn.book.shelfLocation}
+                      Rayon : {scanReturnState.successReturn.book.shelfLocation}
                     </span>
                     <span className="bg-emerald-700 px-2.5 py-1 rounded-lg">
-                      Nouveau stock disponible : {scanReturnState.successReturn.book.availableCopies} sur {scanReturnState.successReturn.book.totalCopies}
+                      Disponibles : {scanReturnState.successReturn.book.availableCopies} sur {scanReturnState.successReturn.book.totalCopies}
                     </span>
                   </div>
                 </div>
@@ -449,12 +541,12 @@ export const BorrowReturnStation: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* ZONE COMMUNE : CAMÉRA / SAISIE & SIMULATEURS DE SCAN RAPIDE               */}
+      {/* ZONE COMMUNE : CAMÉRA AVEC DÉCODAGE jsQR EN DIRECT & SAISIE MANUELLE      */}
       {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Colonne gauche : Caméra & Saisie code (Col 1-7) */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-xs">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center space-x-2">
                 <QrCode className="w-5 h-5 text-blue-600" />
@@ -471,7 +563,7 @@ export const BorrowReturnStation: React.FC = () => {
 
               <button
                 onClick={() => setUseCamera(!useCamera)}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
                   useCamera
                     ? 'bg-rose-50 text-rose-700 border-rose-200'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
@@ -482,7 +574,7 @@ export const BorrowReturnStation: React.FC = () => {
               </button>
             </div>
 
-            {/* Viseur caméra si actif */}
+            {/* Viseur caméra avec détection jsQR en direct */}
             {useCamera && (
               <div className="relative aspect-video w-full rounded-2xl bg-slate-950 overflow-hidden mb-4 border-2 border-dashed border-blue-400">
                 <video
@@ -492,17 +584,28 @@ export const BorrowReturnStation: React.FC = () => {
                   muted
                   className="w-full h-full object-cover"
                 />
+
+                {/* Viseur de cadrage */}
                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                   <div className="w-48 h-48 border-2 border-white/80 rounded-2xl relative">
                     <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-blue-500 -mt-1 -ml-1" />
                     <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-blue-500 -mt-1 -mr-1" />
                     <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-blue-500 -mb-1 -ml-1" />
                     <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-blue-500 -mb-1 -mr-1" />
+                    <div className="w-full h-0.5 bg-blue-400/80 absolute top-1/2 -translate-y-1/2 animate-pulse" />
                   </div>
                 </div>
-                <div className="absolute bottom-2 left-0 right-0 text-center text-[11px] text-white/90 bg-black/50 py-1">
-                  Pointez vers le QR code de l'exemplaire ou de la carte
-                </div>
+
+                {/* Notification de détection live */}
+                {decodedQrMessage ? (
+                  <div className="absolute top-3 left-3 right-3 bg-emerald-600 text-white text-xs font-bold py-1.5 px-3 rounded-xl text-center shadow-lg animate-in fade-in">
+                    ✓ {decodedQrMessage}
+                  </div>
+                ) : (
+                  <div className="absolute bottom-2 left-0 right-0 text-center text-[11px] text-white/90 bg-black/60 py-1">
+                    Analyse vidéo jsQR en cours : visez le QR code du livre ou de la carte
+                  </div>
+                )}
               </div>
             )}
 
@@ -532,10 +635,10 @@ export const BorrowReturnStation: React.FC = () => {
               </div>
             )}
 
-            {/* Formulaire manuel */}
+            {/* Formulaire de saisie manuelle */}
             <form onSubmit={handleManualSubmit} className="space-y-3">
               <label className="block text-xs font-semibold text-slate-700">
-                Entrez le code QR ou l'identifiant (ex: EST-LIV-101 ou CARD-EST-2024-012) :
+                Saisie manuelle ou douchette code-barres (ex: EST-LIV-101 ou CARD-EST-2024-012) :
               </label>
               <div className="flex space-x-2">
                 <input
@@ -563,7 +666,7 @@ export const BorrowReturnStation: React.FC = () => {
 
         {/* Colonne droite : Simulateurs de scan 1-Clic pour tester facilement (Col 8-12) */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
+          <div className="bg-slate-50 rounded-3xl p-5 border border-slate-200">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3 flex items-center justify-between">
               <span>Simulateur de scan rapide (1-Clic)</span>
               <span className="text-[10px] bg-slate-200 px-2 py-0.5 rounded-full text-slate-700 font-mono">
@@ -582,8 +685,6 @@ export const BorrowReturnStation: React.FC = () => {
                 </p>
 
                 {books.slice(0, 4).map((b) => {
-                  const hasActiveLoan = loans.some((l) => l.bookId === b.id && l.status === 'active');
-
                   return (
                     <button
                       key={b.id}
@@ -601,7 +702,7 @@ export const BorrowReturnStation: React.FC = () => {
                           {b.title}
                         </span>
                         <span className="text-[10px] font-mono text-slate-500">
-                          {b.id} · Stock : {b.availableCopies}/{b.totalCopies}
+                          {b.id} · Stock dispo : {b.availableCopies}/{b.totalCopies}
                         </span>
                       </div>
                       <span
@@ -611,7 +712,7 @@ export const BorrowReturnStation: React.FC = () => {
                             : 'bg-rose-50 text-rose-700 border border-rose-200'
                         }`}
                       >
-                        {b.availableCopies > 0 ? `${b.availableCopies} dispo` : 'En prêt'}
+                        {b.availableCopies > 0 ? `${b.availableCopies} dispo` : 'En prêt/réservé'}
                       </span>
                     </button>
                   );
@@ -628,15 +729,6 @@ export const BorrowReturnStation: React.FC = () => {
                     ? "Cliquez sur la carte d'un étudiant pour enregistrer l'emprunt :"
                     : "Cliquez sur la carte de l'étudiant pour valider automatiquement la restitution :"}
                 </p>
-
-                {activeStationMode === 'borrow' && (
-                  <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-xl mb-3 text-xs text-amber-900">
-                    <span className="font-bold block">Test règle des 3 livres :</span>
-                    <span>
-                      Alexandre Fontaine possède déjà 3 prêts actifs. Cliquez sur lui pour vérifier le refus automatique immédiat.
-                    </span>
-                  </div>
-                )}
 
                 {students.map((s) => {
                   const activeCount = s.activeLoanBookIds.length;

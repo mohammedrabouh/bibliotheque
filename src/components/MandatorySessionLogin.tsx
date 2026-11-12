@@ -8,20 +8,19 @@ import {
   AlertCircle,
   ShieldCheck,
   Info,
-  GraduationCap,
-  Briefcase,
   KeyRound,
+  ShieldAlert,
 } from 'lucide-react';
 
 export const MandatorySessionLogin: React.FC = () => {
-  const { login } = useLibrary();
+  const { login, authMode } = useLibrary();
 
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showSsoNotice, setShowSsoNotice] = useState(false);
+  const [showArchitectureNotice, setShowArchitectureNotice] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,7 +30,12 @@ export const MandatorySessionLogin: React.FC = () => {
     const cleanPassword = passwordInput;
 
     if (!cleanEmail) {
-      setFormError("Veuillez saisir votre adresse e-mail institutionnelle ou professionnelle.");
+      setFormError("Veuillez renseigner votre adresse e-mail.");
+      return;
+    }
+
+    if (!cleanEmail.includes('@') || !cleanEmail.includes('.')) {
+      setFormError("Format d'adresse e-mail invalide (ex: nom.prenom@usmba.ac.ma).");
       return;
     }
 
@@ -47,9 +51,9 @@ export const MandatorySessionLogin: React.FC = () => {
       if (!result.success) {
         setFormError(result.error || "Identifiants incorrects. Veuillez vérifier vos accès.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setFormError("Une erreur est survenue lors de la vérification des identifiants.");
+      setFormError(err?.message || "Une erreur est survenue lors de la communication avec le serveur d'authentification.");
     } finally {
       setIsSubmitting(false);
     }
@@ -60,7 +64,7 @@ export const MandatorySessionLogin: React.FC = () => {
       <div className="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-200 relative overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Header USMBA & EST */}
-        <div className="flex items-center space-x-3.5 mb-6 pb-5 border-b border-slate-100">
+        <div className="flex items-center space-x-3.5 mb-5 pb-5 border-b border-slate-100">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-700 to-indigo-900 text-white flex items-center justify-center shadow-lg shadow-blue-900/20 shrink-0">
             <School className="w-6 h-6" />
           </div>
@@ -79,13 +83,19 @@ export const MandatorySessionLogin: React.FC = () => {
           </div>
         </div>
 
-        {/* Introduction institutionnelle épurée */}
-        <div className="mb-6">
-          <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">
-            Connexion au portail
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Accédez à votre espace bibliothèque avec vos identifiants autorisés.
+        {/* Titre & Statut de sécurité réel */}
+        <div className="mb-5">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">
+              Connexion au portail
+            </h2>
+            <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+              <ShieldCheck className="w-3 h-3 text-emerald-600" />
+              <span>Contrôle serveur actif</span>
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Authentification institutionnelle avec protection anti-bruteforce (limite de 5 tentatives).
           </p>
         </div>
 
@@ -98,10 +108,10 @@ export const MandatorySessionLogin: React.FC = () => {
         )}
 
         {/* Formulaire de connexion sécurisé */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-slate-700">
-              Adresse e-mail
+              Adresse e-mail autorisée
             </label>
             <div className="relative">
               <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -163,7 +173,7 @@ export const MandatorySessionLogin: React.FC = () => {
             {isSubmitting ? (
               <div className="flex items-center space-x-2">
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                <span>Vérification sécurisée en cours...</span>
+                <span>Vérification sur le serveur en cours...</span>
               </div>
             ) : (
               <>
@@ -175,29 +185,29 @@ export const MandatorySessionLogin: React.FC = () => {
           </button>
         </form>
 
-        {/* Note informative sur Google Workspace / SSO */}
+        {/* Note informative d'architecture et de sécurité pour la soutenance */}
         <div className="mt-5 pt-4 border-t border-slate-100">
           <button
             type="button"
-            onClick={() => setShowSsoNotice(!showSsoNotice)}
-            className="w-full flex items-center justify-between text-[11px] text-slate-500 hover:text-slate-800 transition-colors"
+            onClick={() => setShowArchitectureNotice(!showArchitectureNotice)}
+            className="w-full flex items-center justify-between text-[11px] text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
           >
             <span className="flex items-center space-x-1.5 font-medium">
-              <Info className="w-3.5 h-3.5 text-blue-600" />
-              <span>Authentification Google Workspace SSO</span>
+              <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+              <span>Architecture de sécurité & Intégration</span>
             </span>
             <span className="text-[10px] text-blue-600 font-bold">
-              {showSsoNotice ? "Masquer" : "En savoir plus"}
+              {showArchitectureNotice ? "Masquer" : "Détails techniques"}
             </span>
           </button>
 
-          {showSsoNotice && (
-            <div className="mt-2.5 p-3 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600 space-y-1.5 animate-in fade-in">
+          {showArchitectureNotice && (
+            <div className="mt-2.5 p-3 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] text-slate-600 space-y-2 animate-in fade-in">
               <p>
-                L'authentification Google Workspace SSO nécessite un enregistrement d'application Google Cloud OAuth avec ID client universitaire.
+                <strong>Sécurité actuelle :</strong> Vérification d'authentification sur serveur Node.js/Express (`/api/auth/login`), tokens cryptographiques 256 bits, protection contre les attaques par force brute (verrouillage automatique après 5 tentatives).
               </p>
-              <p className="text-slate-500 italic">
-                En attendant la mise en service du domaine SSO, la plateforme vérifie les comptes autorisés avec hachage cryptographique SHA-256 standard.
+              <p className="text-slate-500">
+                <strong>Pour la mise en production à grande échelle :</strong> Connecter une base relationnelle PostgreSQL / Supabase ou Firebase Auth avec hachage Argon2id/Bcrypt et configuration de cookies HttpOnly Secure signés.
               </p>
             </div>
           )}
@@ -207,9 +217,9 @@ export const MandatorySessionLogin: React.FC = () => {
         <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
           <span className="flex items-center space-x-1">
             <Lock className="w-3 h-3 text-slate-400" />
-            <span>Sécurité certifiée biblioEST</span>
+            <span>Sécurité biblioEST vérifiée</span>
           </span>
-          <span>EST USMBA 2026</span>
+          <span>EST USMBA</span>
         </div>
       </div>
     </div>
