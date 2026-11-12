@@ -12,8 +12,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   Plus,
-  Edit2,
-  Trash2,
   Search,
   Filter,
   Check,
@@ -59,12 +57,9 @@ export const ManagerDashboard: React.FC = () => {
     loansDueToday,
     reservedLoans,
     activeLoans,
-    // Actions Gérant
+    // Actions Gérant (Ajout d'ouvrage & flux opérationnels uniquement - pas de modification/suppression CRUD)
     addBook,
-    updateBook,
-    deleteOrArchiveBook,
     addCategory,
-    repairDamagedBook,
     confirmPhysicalHandover,
     cancelReservation,
     processPhysicalReturn,
@@ -88,11 +83,8 @@ export const ManagerDashboard: React.FC = () => {
   // Filtre sévérité des retards
   const [severityFilter, setSeverityFilter] = useState<'all' | OverdueSeverity>('all');
 
-  // État formulaire nouveau livre
+  // État formulaire ajout d'un nouvel ouvrage
   const [showAddBookModal, setShowAddBookModal] = useState(false);
-  const [editingBook, setEditingBook] = useState<Book | null>(null);
-  const [customCategoryInput, setCustomCategoryInput] = useState('');
-  const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
 
   const [bookForm, setBookForm] = useState({
     title: '',
@@ -110,7 +102,7 @@ export const ManagerDashboard: React.FC = () => {
     coverColor: 'from-blue-600 to-indigo-800',
   });
 
-  // Recherche dans la gestion des livres
+  // Recherche dans la consultation des livres
   const [bookSearchQuery, setBookSearchQuery] = useState('');
   const [selectedBookCategoryFilter, setSelectedBookCategoryFilter] = useState<string>('all');
 
@@ -141,7 +133,7 @@ export const ManagerDashboard: React.FC = () => {
   const orangeLoans = overdueLoans.filter((l) => l.severity === 'orange');
   const redLoans = overdueLoans.filter((l) => l.severity === 'red');
 
-  // Filtrage des livres pour l'onglet gestion
+  // Filtrage des livres pour la consultation
   const filteredBooksList = books
     .filter((b) => !b.isArchived)
     .filter((b) => {
@@ -155,7 +147,7 @@ export const ManagerDashboard: React.FC = () => {
       return matchesSearch && matchesCat;
     });
 
-  // Soumission formulaire livre
+  // Soumission formulaire ajout de livre
   const handleBookFormSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!bookForm.title || !bookForm.author || !bookForm.isbn) {
@@ -163,60 +155,24 @@ export const ManagerDashboard: React.FC = () => {
       return;
     }
 
-    if (editingBook) {
-      updateBook(editingBook.id, {
-        title: bookForm.title,
-        author: bookForm.author,
-        category: bookForm.category,
-        publishedYear: Number(bookForm.publishedYear),
-        publisher: bookForm.publisher,
-        isbn: bookForm.isbn,
-        shelfLocation: bookForm.shelfLocation,
-        description: bookForm.description,
-        totalCopies: Number(bookForm.totalCopies),
-      });
-      showFeedback(`L'ouvrage « ${bookForm.title} » a été mis à jour avec succès.`);
-    } else {
-      addBook({
-        title: bookForm.title,
-        author: bookForm.author,
-        category: bookForm.category,
-        publishedYear: Number(bookForm.publishedYear),
-        publisher: bookForm.publisher,
-        isbn: bookForm.isbn,
-        shelfLocation: bookForm.shelfLocation,
-        description: bookForm.description,
-        summary: bookForm.summary,
-        tableOfContents: bookForm.tableOfContents,
-        totalCopies: Number(bookForm.totalCopies),
-        coverImage: bookForm.coverImage,
-        coverColor: bookForm.coverColor,
-      });
-      showFeedback(`L'ouvrage « ${bookForm.title} » a été ajouté au catalogue.`);
-    }
+    addBook({
+      title: bookForm.title,
+      author: bookForm.author,
+      category: bookForm.category,
+      publishedYear: Number(bookForm.publishedYear),
+      publisher: bookForm.publisher,
+      isbn: bookForm.isbn,
+      shelfLocation: bookForm.shelfLocation,
+      description: bookForm.description,
+      summary: bookForm.summary,
+      tableOfContents: bookForm.tableOfContents,
+      totalCopies: Number(bookForm.totalCopies),
+      coverImage: bookForm.coverImage,
+      coverColor: bookForm.coverColor,
+    });
+    showFeedback(`L'ouvrage « ${bookForm.title} » a été ajouté avec succès au catalogue.`);
 
     setShowAddBookModal(false);
-    setEditingBook(null);
-  };
-
-  const openEditBook = (book: Book) => {
-    setEditingBook(book);
-    setBookForm({
-      title: book.title,
-      author: book.author,
-      category: book.category,
-      publishedYear: book.publishedYear,
-      publisher: book.publisher,
-      isbn: book.isbn,
-      shelfLocation: book.shelfLocation,
-      description: book.description,
-      summary: book.summary,
-      tableOfContents: book.tableOfContents,
-      totalCopies: book.totalCopies,
-      coverImage: book.coverImage,
-      coverColor: book.coverColor,
-    });
-    setShowAddBookModal(true);
   };
 
   // Traitement retour physique
@@ -286,9 +242,9 @@ export const ManagerDashboard: React.FC = () => {
         </div>
 
         <div className="flex items-center space-x-3">
+          {/* Bouton d'ajout d'ouvrage (conservé) */}
           <button
             onClick={() => {
-              setEditingBook(null);
               setBookForm({
                 title: '',
                 author: '',
@@ -298,8 +254,8 @@ export const ManagerDashboard: React.FC = () => {
                 isbn: '',
                 shelfLocation: 'Rayon A-1',
                 description: '',
-                summary: '',
-                tableOfContents: [],
+                summary: 'Présentation générale des principes et méthodes...',
+                tableOfContents: ['Introduction générale', 'Concepts fondamentaux', 'Études de cas'],
                 totalCopies: 3,
                 coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&auto=format&fit=crop&q=80',
                 coverColor: 'from-blue-600 to-indigo-800',
@@ -740,7 +696,7 @@ export const ManagerDashboard: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* ONGLET 2 : LIVRES & GESTION DU STOCK                                      */}
+      {/* ONGLET 2 : LIVRES & GESTION DU STOCK (CONSULTATION PURE SANS CRUD MODIF)  */}
       {/* ========================================================================= */}
       {activeTab === 'books' && (
         <div className="space-y-4">
@@ -752,7 +708,7 @@ export const ManagerDashboard: React.FC = () => {
                 type="text"
                 value={bookSearchQuery}
                 onChange={(e) => setBookSearchQuery(e.target.value)}
-                placeholder="Filtrer par titre, auteur, cote de rangement..."
+                placeholder="Consulter par titre, auteur, cote de rangement, ISBN..."
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden"
               />
             </div>
@@ -771,8 +727,13 @@ export const ManagerDashboard: React.FC = () => {
             </select>
           </div>
 
-          {/* Tableau des livres */}
+          {/* Tableau de consultation des ouvrages et stocks */}
           <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 sm:px-6 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs text-slate-500 font-semibold">
+              <span>Ouvrages répertoriés ({filteredBooksList.length})</span>
+              <span>État et répartition des exemplaires physiques</span>
+            </div>
+
             <div className="divide-y divide-slate-100">
               {filteredBooksList.map((book) => (
                 <div
@@ -791,69 +752,37 @@ export const ManagerDashboard: React.FC = () => {
                         <span className="text-slate-500">de {book.author}</span>
                       </div>
                       <div className="text-slate-500 mt-1 flex flex-wrap items-center gap-x-2 text-[11px]">
-                        <span className="font-mono text-slate-600">{book.id}</span>
+                        <span className="font-mono text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">{book.id}</span>
                         <span>·</span>
                         <span>{book.category}</span>
                         <span>·</span>
                         <span className="font-bold text-slate-700">Cote : {book.shelfLocation}</span>
+                        <span>·</span>
+                        <span>Édition {book.publishedYear} ({book.publisher})</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Badges de stock des 4 états */}
+                  {/* Affichage des quantités physiques réparties */}
                   <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
-                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-1 rounded-lg font-bold">
-                      {book.availableCopies} dispo(s)
+                    <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1 rounded-xl font-bold">
+                      {book.availableCopies} en rayon (dispo)
                     </span>
-                    <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-2.5 py-1 rounded-lg font-bold">
+                    <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-3 py-1 rounded-xl font-bold">
                       {book.reservedCopies || 0} réservé(s)
                     </span>
-                    <span className="bg-blue-50 text-blue-800 border border-blue-200 px-2.5 py-1 rounded-lg font-bold">
+                    <span className="bg-blue-50 text-blue-800 border border-blue-200 px-3 py-1 rounded-xl font-bold">
                       {book.borrowedCopies} emprunté(s)
                     </span>
                     {(book.unavailableCopies || 0) > 0 && (
-                      <span className="bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-1 rounded-lg font-bold flex items-center space-x-1">
+                      <span className="bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1 rounded-xl font-bold flex items-center space-x-1">
                         <Wrench className="w-3 h-3 text-amber-600" />
                         <span>{book.unavailableCopies} réparation</span>
                       </span>
                     )}
-
-                    {/* Actions sur le livre */}
-                    <div className="flex items-center space-x-1 ml-2">
-                      {(book.unavailableCopies || 0) > 0 && (
-                        <button
-                          onClick={() => {
-                            repairDamagedBook(book.id);
-                            showFeedback(`Exemplaire de « ${book.title} » réparé et remis en rayon.`);
-                          }}
-                          className="p-1.5 text-amber-600 hover:bg-amber-50 rounded-lg"
-                          title="Remettre un exemplaire réparé en rayon"
-                        >
-                          <Wrench className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-
-                      <button
-                        onClick={() => openEditBook(book)}
-                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
-                        title="Modifier l'ouvrage"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          if (confirm(`Archiver « ${book.title} » du catalogue ?`)) {
-                            deleteOrArchiveBook(book.id);
-                            showFeedback(`« ${book.title} » a été archivé.`);
-                          }
-                        }}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer"
-                        title="Archiver"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                    <span className="bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-xl font-mono text-[11px]">
+                      Total : {book.totalCopies}
+                    </span>
                   </div>
                 </div>
               ))}
@@ -1098,13 +1027,13 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL AJOUT / ÉDITION DE LIVRE */}
+      {/* MODAL AJOUT D'UN NOUVEL OUVRAGE (SEULE ACTION D'ÉCRITURE CONSERVÉE) */}
       {showAddBookModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 border border-slate-200 shadow-2xl animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-extrabold text-base text-slate-900">
-                {editingBook ? 'Modifier l’ouvrage' : 'Ajouter un nouvel ouvrage'}
+                Ajouter un nouvel ouvrage au catalogue
               </h3>
               <button
                 onClick={() => setShowAddBookModal(false)}
@@ -1181,7 +1110,7 @@ export const ManagerDashboard: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="font-bold text-slate-700 block mb-1">Volume total d'exemplaires :</label>
+                  <label className="font-bold text-slate-700 block mb-1">Volume d'exemplaires à enregistrer :</label>
                   <input
                     type="number"
                     min="1"
@@ -1224,7 +1153,7 @@ export const ManagerDashboard: React.FC = () => {
                   type="submit"
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl cursor-pointer shadow-xs"
                 >
-                  {editingBook ? 'Enregistrer les modifications' : 'Ajouter au catalogue'}
+                  Ajouter au catalogue
                 </button>
               </div>
             </form>
@@ -1372,7 +1301,7 @@ export const ManagerDashboard: React.FC = () => {
                   Annuler
                 </button>
                 <button
-                  type="button"
+                  type="submit"
                   onClick={handleConfirmReport}
                   className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl cursor-pointer shadow-xs"
                 >
