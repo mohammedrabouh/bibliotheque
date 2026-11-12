@@ -1,0 +1,6 @@
+{
+  "name": "biblioEST - Bibliothèque de l'EST (USMBA)",
+  "description": "Application web responsive de gestion de bibliothèque pour l'École Supérieure de Technologie (USMBA) : catalogue avec Hero Section, retards colorés, double scan QR automatique pour emprunt et retour sans clic.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
