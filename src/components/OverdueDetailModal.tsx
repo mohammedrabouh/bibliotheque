@@ -132,7 +132,7 @@ export const OverdueDetailModal: React.FC<OverdueDetailModalProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-100 text-xs">
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                   <span className="text-slate-400 text-[10px] uppercase font-bold block">Emprunté le</span>
-                  <span className="font-medium text-slate-800">{formatDisplayDate(loan.borrowedDate || loan.requestDate)}</span>
+                  <span className="font-medium text-slate-800">{formatDisplayDate(loan.borrowedDate || loan.reservationDate || loan.requestDate || '')}</span>
                 </div>
                 <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                   <span className="text-slate-400 text-[10px] uppercase font-bold block">Date limite prévue</span>

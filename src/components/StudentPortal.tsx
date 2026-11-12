@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useLibrary } from '../context/LibraryContext';
-import { Book, Loan } from '../types';
 import {
   Search,
   BookOpen,
@@ -13,12 +12,12 @@ import {
   QrCode,
   Info,
   Clock,
-  Calendar,
   AlertTriangle,
   BookmarkCheck,
   Check,
   AlertCircle,
   Bell,
+  Undo2,
 } from 'lucide-react';
 import { BookDetailPage } from './BookDetailPage';
 import { QRCodeView } from './QRCodeView';
@@ -33,7 +32,8 @@ export const StudentPortal: React.FC = () => {
     systemDate,
     selectedBookForDetail,
     setSelectedBookForDetail,
-    requestBookLoan,
+    reserveBook,
+    cancelReservation,
   } = useLibrary();
 
   const [activeTab, setActiveTab] = useState<'catalog' | 'my-loans' | 'my-notifs'>('catalog');
@@ -43,8 +43,8 @@ export const StudentPortal: React.FC = () => {
   const [expandedBookId, setExpandedBookId] = useState<string | null>(null);
   const [showStudentCardModal, setShowStudentCardModal] = useState(false);
 
-  // Messages de retour d'action (demande d'emprunt)
-  const [requestFeedback, setRequestFeedback] = useState<{
+  // Messages de retour d'action
+  const [reservationFeedback, setReservationFeedback] = useState<{
     type: 'success' | 'error';
     message: string;
   } | null>(null);
@@ -59,10 +59,10 @@ export const StudentPortal: React.FC = () => {
     );
   }
 
-  // Filtrage des emprunts personnels de l'étudiant connecté (Strictement aucun accès aux autres)
+  // Filtrage des emprunts et réservations personnels de l'étudiant connecté
   const myLoans = loans.filter((l) => l.studentId === currentUser?.id);
-  const myActiveOrPendingCount = myLoans.filter(
-    (l) => l.status === 'active' || l.status === 'accepted' || l.status === 'pending'
+  const myActiveOrReservedCount = myLoans.filter(
+    (l) => l.status === 'active' || l.status === 'reserved'
   ).length;
 
   const myNotifications = notifications.filter((n) => n.userId === currentUser?.id);
@@ -87,46 +87,57 @@ export const StudentPortal: React.FC = () => {
       return matchesSearch && matchesAvailability && matchesCategory;
     });
 
-  const handleRequestLoan = (bookId: string) => {
-    setRequestFeedback(null);
-    const res = requestBookLoan(bookId);
+  const handleReserve = (bookId: string) => {
+    setReservationFeedback(null);
+    const res = reserveBook(bookId);
     if (res.success) {
-      setRequestFeedback({
+      setReservationFeedback({
         type: 'success',
         message:
-          "Votre demande d'emprunt a été enregistrée avec succès ! Le Gérant de bibliothèque l'examinera dans les plus brefs délais.",
+          "Réservation enregistrée avec succès ! Un exemplaire vous est immédiatement réservé au comptoir. Rendez-vous à la bibliothèque pour le récupérer.",
       });
-      setTimeout(() => setRequestFeedback(null), 6000);
+      setTimeout(() => setReservationFeedback(null), 6000);
     } else {
-      setRequestFeedback({
+      setReservationFeedback({
         type: 'error',
-        message: res.error || "Impossible d'effectuer la demande d'emprunt.",
+        message: res.error || "Impossible de réserver cet ouvrage.",
       });
-      setTimeout(() => setRequestFeedback(null), 6000);
+      setTimeout(() => setReservationFeedback(null), 6000);
+    }
+  };
+
+  const handleCancelReservation = (loanId: string) => {
+    const res = cancelReservation(loanId);
+    if (res.success) {
+      setReservationFeedback({
+        type: 'success',
+        message: "Votre réservation a été annulée. L'exemplaire a été réintégré en rayon disponible.",
+      });
+      setTimeout(() => setReservationFeedback(null), 5000);
     }
   };
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6 pb-20">
-      {/* Toast Feedback d'emprunt */}
-      {requestFeedback && (
+      {/* Toast Feedback de réservation */}
+      {reservationFeedback && (
         <div
           className={`p-4 rounded-2xl shadow-lg border flex items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top ${
-            requestFeedback.type === 'success'
+            reservationFeedback.type === 'success'
               ? 'bg-emerald-600 text-white border-emerald-500'
               : 'bg-rose-600 text-white border-rose-500'
           }`}
         >
           <div className="flex items-center space-x-2.5">
-            {requestFeedback.type === 'success' ? (
+            {reservationFeedback.type === 'success' ? (
               <Check className="w-5 h-5 text-emerald-200 shrink-0" />
             ) : (
               <AlertCircle className="w-5 h-5 text-rose-200 shrink-0" />
             )}
-            <span className="text-xs sm:text-sm font-bold">{requestFeedback.message}</span>
+            <span className="text-xs sm:text-sm font-bold">{reservationFeedback.message}</span>
           </div>
           <button
-            onClick={() => setRequestFeedback(null)}
+            onClick={() => setReservationFeedback(null)}
             className="text-xs text-white/80 hover:text-white"
           >
             ✕
@@ -134,12 +145,12 @@ export const StudentPortal: React.FC = () => {
         </div>
       )}
 
-      {/* En-tête Espace Étudiant épuré (pas de filières ni noms de modules) */}
+      {/* En-tête Espace Étudiant */}
       <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2">
             <span className="text-xs font-bold uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-              Espace Consultation Étudiant
+              Espace Étudiant
             </span>
             <span className="text-xs text-slate-400 font-mono">EST USMBA</span>
           </div>
@@ -147,7 +158,7 @@ export const StudentPortal: React.FC = () => {
             Catalogue des Ouvrages & Mes Emprunts
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Consultez les livres disponibles, demandez un emprunt et suivez vos échéances de restitution.
+            Consultez les ouvrages en rayon, réservez directement un livre disponible et suivez vos retraits et restitutions.
           </p>
         </div>
 
@@ -186,10 +197,10 @@ export const StudentPortal: React.FC = () => {
           }`}
         >
           <BookmarkCheck className="w-4 h-4" />
-          <span>Mes Emprunts & Demandes ({myLoans.length})</span>
-          {myActiveOrPendingCount > 0 && (
+          <span>Mes Emprunts & Réservations ({myLoans.length})</span>
+          {myActiveOrReservedCount > 0 && (
             <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[10px]">
-              {myActiveOrPendingCount}/3
+              {myActiveOrReservedCount}/3
             </span>
           )}
         </button>
@@ -207,11 +218,11 @@ export const StudentPortal: React.FC = () => {
         </button>
       </div>
 
-      {/* Rappel des modalités : pas de réservation en ligne, retrait physique au comptoir */}
+      {/* Bannière explicative : réservation directe et retrait physique */}
       <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-4 text-xs text-blue-950 flex items-start space-x-3 shadow-2xs">
         <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
         <div className="leading-relaxed">
-          <strong>Modalités d'emprunt à l'EST USMBA :</strong> Après acceptation de votre demande, présentez-vous à la bibliothèque muni de votre carte d'étudiant pour la remise physique du livre par le Gérant de bibliothèque. Chaque étudiant peut emprunter un maximum de <strong>3 exemplaires</strong> simultanément.
+          <strong>Fonctionnement des réservations :</strong> Réservez directement tout ouvrage disponible en rayon d'un simple clic. L'exemplaire est réservé pour vous au comptoir. Présentez-vous ensuite à la bibliothèque avec votre carte d'étudiant pour la <strong>remise physique du livre</strong>. L'emprunt effectif démarre uniquement lorsque le gérant vous remet l'ouvrage. Limite maximale : <strong>3 ouvrages</strong> simultanés par étudiant.
         </div>
       </div>
 
@@ -274,7 +285,7 @@ export const StudentPortal: React.FC = () => {
               {filteredBooks.length} ouvrage{filteredBooks.length > 1 ? 's' : ''} au catalogue
             </span>
             <span className="italic">
-              Cliquez sur une barre pour l'expandre
+              Cliquez sur un ouvrage pour le consulter et réserver
             </span>
           </div>
 
@@ -292,10 +303,10 @@ export const StudentPortal: React.FC = () => {
               filteredBooks.map((book) => {
                 const isExpanded = expandedBookId === book.id;
                 const isAvailable = book.availableCopies > 0;
-                const alreadyRequested = myLoans.some(
+                const alreadyReserved = myLoans.some(
                   (l) =>
                     l.bookId === book.id &&
-                    (l.status === 'pending' || l.status === 'accepted' || l.status === 'active')
+                    (l.status === 'reserved' || l.status === 'active')
                 );
 
                 return (
@@ -338,12 +349,12 @@ export const StudentPortal: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Disponibilité & indicateur de demande en cours */}
+                      {/* Disponibilité & badge */}
                       <div className="flex items-center space-x-3 shrink-0 ml-3">
-                        {alreadyRequested ? (
+                        {alreadyReserved ? (
                           <span className="inline-flex items-center space-x-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
                             <Clock className="w-3.5 h-3.5 text-blue-600" />
-                            <span className="hidden sm:inline">En cours chez vous</span>
+                            <span className="hidden sm:inline">Réservé / Emprunté par vous</span>
                           </span>
                         ) : isAvailable ? (
                           <span className="inline-flex items-center space-x-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
@@ -381,8 +392,10 @@ export const StudentPortal: React.FC = () => {
                             <span className="font-bold text-slate-900">{book.category}</span>
                           </div>
                           <div className="bg-white p-3 rounded-xl border border-slate-200">
-                            <span className="text-slate-400 text-[10px] font-bold uppercase block">Année & Éditeur</span>
-                            <span className="font-bold text-slate-900">{book.publishedYear} ({book.publisher})</span>
+                            <span className="text-slate-400 text-[10px] font-bold uppercase block">Disponibilité</span>
+                            <span className="font-bold text-slate-900">
+                              {book.availableCopies} en rayon / {book.totalCopies} total
+                            </span>
                           </div>
                           <div className="bg-white p-3 rounded-xl border border-slate-200">
                             <span className="text-slate-400 text-[10px] font-bold uppercase block">Cote de rayon</span>
@@ -398,22 +411,30 @@ export const StudentPortal: React.FC = () => {
                         </p>
 
                         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                          {/* Bouton Demander l'emprunt */}
+                          {/* Bouton de réservation directe */}
                           <div className="flex items-center space-x-2">
                             <button
-                              onClick={() => handleRequestLoan(book.id)}
-                              disabled={!isAvailable || alreadyRequested || myActiveOrPendingCount >= 3}
-                              className="inline-flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+                              onClick={() => handleReserve(book.id)}
+                              disabled={!isAvailable || alreadyReserved || myActiveOrReservedCount >= 3}
+                              className={`inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer ${
+                                alreadyReserved
+                                  ? 'bg-blue-100 text-blue-800 border border-blue-200 cursor-not-allowed opacity-80'
+                                  : !isAvailable
+                                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                                  : myActiveOrReservedCount >= 3
+                                  ? 'bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed'
+                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                              }`}
                             >
                               <BookmarkCheck className="w-3.5 h-3.5" />
                               <span>
-                                {alreadyRequested
-                                  ? "Demande déjà enregistrée"
+                                {alreadyReserved
+                                  ? "Déjà réservé par vous"
                                   : !isAvailable
-                                  ? "Aucun exemplaire dispo"
-                                  : myActiveOrPendingCount >= 3
-                                  ? "Limite de 3 atteinte"
-                                  : "Demander l'emprunt"}
+                                  ? "Indisponible"
+                                  : myActiveOrReservedCount >= 3
+                                  ? "Quota de 3 atteint"
+                                  : "Réserver"}
                               </span>
                             </button>
                           </div>
@@ -423,7 +444,7 @@ export const StudentPortal: React.FC = () => {
                             className="inline-flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-xs transition-colors group cursor-pointer"
                           >
                             <BookOpen className="w-3.5 h-3.5" />
-                            <span>Plus de détails (Sommaire & Résumé)</span>
+                            <span>Voir la fiche complète</span>
                             <ArrowRight className="w-3.5 h-3.5 transition-transform group-hover:translate-x-1" />
                           </button>
                         </div>
@@ -438,32 +459,32 @@ export const StudentPortal: React.FC = () => {
       )}
 
       {/* ========================================================================= */}
-      {/* ONGLET 2 : MES EMPRUNTS & DEMANDES (Visibilité uniquement personnelle)     */}
+      {/* ONGLET 2 : MES EMPRUNTS & RÉSERVATIONS                                    */}
       {/* ========================================================================= */}
       {activeTab === 'my-loans' && (
         <div className="space-y-4">
           <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
               <h3 className="font-extrabold text-base sm:text-lg text-slate-900">
-                Mes Emprunts & Demandes en cours ({myLoans.length})
+                Mes Emprunts & Réservations ({myLoans.length})
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
-                Suivez en direct la validation de vos demandes et la date de retour prévue.
+                Suivez vos ouvrages réservés à retirer au comptoir et vos emprunts en cours.
               </p>
             </div>
 
             <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 text-xs shrink-0">
-              <span className="text-slate-500">Quota d'emprunts :</span>
-              <strong className="text-slate-900 font-extrabold">{myActiveOrPendingCount} / 3 maximum</strong>
+              <span className="text-slate-500">Quota actif :</span>
+              <strong className="text-slate-900 font-extrabold">{myActiveOrReservedCount} / 3 maximum</strong>
             </div>
           </div>
 
           {myLoans.length === 0 ? (
             <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 shadow-xs">
               <BookmarkCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <h3 className="text-base font-bold text-slate-800">Aucun emprunt enregistré</h3>
+              <h3 className="text-base font-bold text-slate-800">Aucun emprunt ni réservation</h3>
               <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                Vous n'avez pas d'emprunt ni de demande en cours. Consultez le catalogue pour sélectionner un ouvrage.
+                Vous n'avez pas de livre réservé ou emprunté. Parcourez le catalogue pour réserver un ouvrage disponible.
               </p>
             </div>
           ) : (
@@ -484,11 +505,11 @@ export const StudentPortal: React.FC = () => {
                     <div className="text-slate-600 mt-1 flex flex-wrap items-center gap-x-3 text-[11px]">
                       <span>Cote : <strong>{loan.bookShelf}</strong></span>
                       <span>·</span>
-                      <span>Date demande : {formatDisplayDate(loan.requestDate || systemDate)}</span>
+                      <span>Réservé le : {formatDisplayDate(loan.reservationDate || loan.requestDate || systemDate)}</span>
                       {loan.borrowedDate && (
                         <>
                           <span>·</span>
-                          <span>Remis le : {formatDisplayDate(loan.borrowedDate)}</span>
+                          <span>Remis le : {formatDisplayDate(loan.borrowedDate || '')}</span>
                         </>
                       )}
                       <span>·</span>
@@ -498,33 +519,36 @@ export const StudentPortal: React.FC = () => {
                     </div>
 
                     {loan.daysOverdue > 0 && loan.status === 'active' && (
-                      <div className="mt-1 text-rose-700 font-bold flex items-center space-x-1">
+                      <div className="mt-1.5 text-rose-700 font-bold flex items-center space-x-1.5 bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200 w-fit">
                         <AlertTriangle className="w-3.5 h-3.5" />
-                        <span>En retard de {loan.daysOverdue} jour(s) — Pénalité applicable : {loan.daysOverdue * 5} MAD</span>
+                        <span>En retard de {loan.daysOverdue} jour(s) — Merci de restituer l'ouvrage à la bibliothèque.</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Badge de statut */}
-                  <div className="shrink-0 self-end sm:self-center">
-                    {loan.status === 'pending' && (
-                      <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>Demande en attente de validation</span>
-                      </span>
-                    )}
+                  {/* Statut & Action */}
+                  <div className="flex items-center space-x-2 shrink-0 self-end sm:self-center">
+                    {loan.status === 'reserved' && (
+                      <>
+                        <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-indigo-50 text-indigo-900 border border-indigo-200">
+                          <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Réservé • À retirer au comptoir</span>
+                        </span>
 
-                    {loan.status === 'accepted' && (
-                      <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-blue-100 text-blue-900 border border-blue-300">
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Accepté • Présentez-vous à la bibliothèque</span>
-                      </span>
+                        <button
+                          onClick={() => handleCancelReservation(loan.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title="Annuler la réservation"
+                        >
+                          <Undo2 className="w-4 h-4" />
+                        </button>
+                      </>
                     )}
 
                     {loan.status === 'active' && (
-                      <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        <span>Emprunt actif en votre possession</span>
+                      <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-50 text-emerald-900 border border-emerald-300">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Emprunt actif (Remis en main propre)</span>
                       </span>
                     )}
 
@@ -535,10 +559,9 @@ export const StudentPortal: React.FC = () => {
                       </span>
                     )}
 
-                    {loan.status === 'refused' && (
-                      <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-rose-100 text-rose-900 border border-rose-300">
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>Refusé {loan.reportReason ? `(${loan.reportReason})` : ''}</span>
+                    {loan.status === 'cancelled' && (
+                      <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                        <span>Annulé</span>
                       </span>
                     )}
                   </div>
@@ -556,17 +579,17 @@ export const StudentPortal: React.FC = () => {
         <div className="space-y-4">
           <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs">
             <h3 className="font-extrabold text-base text-slate-900">
-              Mes Notifications Personnelles ({myNotifications.length})
+              Mes Notifications ({myNotifications.length})
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Historique des alertes sur vos demandes, acceptations et rappels d'échéance.
+              Historique des confirmations de réservation, remises d'ouvrages et rappels.
             </p>
           </div>
 
           <div className="space-y-2.5">
             {myNotifications.length === 0 ? (
               <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 text-xs text-slate-400">
-                Aucune notification enregistrée pour votre compte.
+                Aucune notification pour votre compte.
               </div>
             ) : (
               myNotifications.map((n) => (
@@ -613,10 +636,10 @@ export const StudentPortal: React.FC = () => {
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col items-center text-center">
               <QRCodeView value={currentUser.studentCardId} size={150} label={currentUser.studentCardId} />
               <p className="text-xs text-slate-600 mt-3 leading-relaxed">
-                Présentez ce QR code au Gérant de bibliothèque pour emprunter ou restituer vos exemplaires.
+                Présentez ce QR code au Gérant de bibliothèque pour retirer vos réservations ou restituer vos exemplaires.
               </p>
               <div className="mt-2 text-[11px] font-bold text-slate-500">
-                Emprunts actifs : {myActiveOrPendingCount} / 3 autorisés
+                Ouvrages actifs/réservés : {myActiveOrReservedCount} / 3 autorisés
               </div>
             </div>
 

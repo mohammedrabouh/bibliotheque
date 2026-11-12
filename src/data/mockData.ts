@@ -1,17 +1,5 @@
-import { Book, Student, Loan, Notification, PenaltyRule, User } from '../types';
+import { Book, Student, Loan, Notification, User } from '../types';
 import { getSystemToday, addDays, calculateDaysOverdue, determineSeverity } from '../utils/dateUtils';
-
-// Règles institutionnelles de pénalités définies par l'administration (non modifiables par le Gérant)
-export const INSTITUTIONAL_PENALTY_RULES: PenaltyRule = {
-  id: 'REGLE-USMBA-2026',
-  name: "Règlement Intérieur de la Bibliothèque Universitaire EST-USMBA",
-  feePerDayMad: 5, // 5 MAD par jour de retard constaté au-delà du délai
-  gracePeriodDays: 0,
-  damagedBookFeeMad: 50, // Forfait réparation / reliure
-  lostBookFeeMad: 150, // Rachat et frais de traitement
-  definedBy: "Direction des Affaires Académiques & Administration Centrale",
-  effectiveDate: "2026-09-01",
-};
 
 export const INITIAL_CATEGORIES = [
   'Littérature classique',
@@ -36,7 +24,7 @@ export const INITIAL_BOOKS: Book[] = [
     shelfLocation: 'Rayon L-04',
     totalCopies: 4,
     availableCopies: 1, // 4 - (1 emprunté + 1 réservé + 1 indisponible) = 1
-    reservedCopies: 1, // Réservé pour la demande acceptée de Salma
+    reservedCopies: 1, // Réservé pour la réservation de Salma
     borrowedCopies: 1, // Détenu par Mehdi
     unavailableCopies: 1, // 1 exemplaire en atelier de reliure (endommagé)
     lostCopies: 0,
@@ -102,8 +90,8 @@ export const INITIAL_BOOKS: Book[] = [
     publisher: 'Le Livre de Poche',
     shelfLocation: 'Rayon C-01',
     totalCopies: 3,
-    availableCopies: 1, // 3 - (1 emprunté Mehdi + 1 réservé) = 1
-    reservedCopies: 1,
+    availableCopies: 2, // 3 - (1 emprunté Mehdi) = 2
+    reservedCopies: 0,
     borrowedCopies: 1,
     unavailableCopies: 0,
     lostCopies: 0,
@@ -260,52 +248,32 @@ export const INITIAL_USERS: User[] = [
 ];
 
 /**
- * Génère des emprunts d'exemples initiaux dynamiquement calés sur la date réelle du système
- * Cela garantit que les tests de retards (Jaune, Orange, Rouge) et les échéances du jour
- * sont TOUJOURS vivants et cohérents quelle que soit la date à laquelle l'application est exécutée.
+ * Génère des emprunts et réservations d'exemples initiaux calés sur la date réelle du système.
+ * Pas de pénalités financières. Système direct de réservation sans demandes en attente.
  */
 export const createInitialLoans = (): Loan[] => {
   const today = getSystemToday();
 
-  // Retard léger (Jaune: 2 jours) -> Échéance il y a 2 jours
+  // Retards réels échelonnés pour tests d'affichage des alertes
   const yellowDue = addDays(today, -2);
   const yellowOverdue = calculateDaysOverdue(yellowDue, today);
 
-  // Retard moyen (Orange: 5 jours) -> Échéance il y a 5 jours
   const orangeDue = addDays(today, -5);
   const orangeOverdue = calculateDaysOverdue(orangeDue, today);
 
-  // Retard élevé (Rouge: 11 jours) -> Échéance il y a 11 jours
   const redDue = addDays(today, -11);
   const redOverdue = calculateDaysOverdue(redDue, today);
 
-  // Échéance aujourd'hui (0 jour) -> Doit être retourné AUJOURD'HUI
+  // Échéance aujourd'hui
   const dueToday = today;
 
   // Échéance future (+12 jours)
   const futureDue = addDays(today, 12);
 
   return [
-    // 1. Demande en attente (Demandée hier par Yassine pour Sapiens)
+    // 1. Réservation directe en cours (Exemplaire réservé pour Salma au comptoir)
     {
-      id: 'DEM-EST-101',
-      bookId: 'EST-LIV-105',
-      bookTitle: 'Sapiens : Une brève histoire de l’humanité',
-      bookAuthor: 'Yuval Noah Harari',
-      bookShelf: 'Rayon H-01',
-      studentId: 'EST-2024-012',
-      studentName: 'Yassine Benali',
-      studentEmail: 'yassine.benali@usmba.ac.ma',
-      studentCardId: 'CARD-EST-2024-012',
-      requestDate: addDays(today, -1),
-      dueDate: addDays(today, 13),
-      status: 'pending',
-      daysOverdue: 0,
-    },
-    // 2. Demande acceptée (En attente de remise physique au comptoir par le Gérant)
-    // Réserve un exemplaire de L'Étranger
-    {
-      id: 'DEM-EST-102',
+      id: 'RES-EST-101',
       bookId: 'EST-LIV-101',
       bookTitle: "L'Étranger",
       bookAuthor: 'Albert Camus',
@@ -314,12 +282,13 @@ export const createInitialLoans = (): Loan[] => {
       studentName: 'Salma El Amrani',
       studentEmail: 'salma.elamrani@usmba.ac.ma',
       studentCardId: 'CARD-EST-2024-045',
-      requestDate: addDays(today, -2),
-      dueDate: addDays(today, 12),
-      status: 'accepted',
+      reservationDate: addDays(today, -1),
+      requestDate: addDays(today, -1),
+      dueDate: addDays(today, 13),
+      status: 'reserved',
       daysOverdue: 0,
     },
-    // 3. Emprunt actif en retard léger (Jaune: 2 jours de retard = 2j x 5 MAD = 10 MAD)
+    // 2. Emprunt actif en retard léger (Jaune: 2 jours de retard)
     {
       id: 'EMPR-EST-902',
       bookId: 'EST-LIV-102',
@@ -330,15 +299,15 @@ export const createInitialLoans = (): Loan[] => {
       studentName: 'Yassine Benali',
       studentEmail: 'yassine.benali@usmba.ac.ma',
       studentCardId: 'CARD-EST-2024-012',
+      reservationDate: addDays(today, -17),
       requestDate: addDays(today, -17),
       borrowedDate: addDays(today, -16),
       dueDate: yellowDue,
       status: 'active',
       daysOverdue: yellowOverdue,
       severity: determineSeverity(yellowOverdue),
-      penaltyFeeMad: yellowOverdue * 5,
     },
-    // 4. Emprunt actif en retard moyen (Orange: 5 jours de retard = 5j x 5 MAD = 25 MAD)
+    // 3. Emprunt actif en retard moyen (Orange: 5 jours de retard)
     {
       id: 'EMPR-EST-903',
       bookId: 'EST-LIV-103',
@@ -349,15 +318,15 @@ export const createInitialLoans = (): Loan[] => {
       studentName: 'Mehdi Chraibi',
       studentEmail: 'mehdi.chraibi@usmba.ac.ma',
       studentCardId: 'CARD-EST-2024-089',
+      reservationDate: addDays(today, -20),
       requestDate: addDays(today, -20),
       borrowedDate: addDays(today, -19),
       dueDate: orangeDue,
       status: 'active',
       daysOverdue: orangeOverdue,
       severity: determineSeverity(orangeOverdue),
-      penaltyFeeMad: orangeOverdue * 5,
     },
-    // 5. Emprunt actif en retard élevé (Rouge: 11 jours de retard = 11j x 5 MAD = 55 MAD)
+    // 4. Emprunt actif en retard élevé (Rouge: 11 jours de retard)
     {
       id: 'EMPR-EST-904',
       bookId: 'EST-LIV-104',
@@ -368,15 +337,15 @@ export const createInitialLoans = (): Loan[] => {
       studentName: 'Alexandre Fontaine',
       studentEmail: 'alexandre.fontaine@usmba.ac.ma',
       studentCardId: 'CARD-EST-2024-110',
+      reservationDate: addDays(today, -26),
       requestDate: addDays(today, -26),
       borrowedDate: addDays(today, -25),
       dueDate: redDue,
       status: 'active',
       daysOverdue: redOverdue,
       severity: determineSeverity(redOverdue),
-      penaltyFeeMad: redOverdue * 5,
     },
-    // 6. Emprunt dont l'échéance de retour est AUJOURD'HUI
+    // 5. Emprunt dont l'échéance de retour est AUJOURD'HUI
     {
       id: 'EMPR-EST-905',
       bookId: 'EST-LIV-101',
@@ -387,13 +356,14 @@ export const createInitialLoans = (): Loan[] => {
       studentName: 'Mehdi Chraibi',
       studentEmail: 'mehdi.chraibi@usmba.ac.ma',
       studentCardId: 'CARD-EST-2024-089',
+      reservationDate: addDays(today, -14),
       requestDate: addDays(today, -14),
       borrowedDate: addDays(today, -14),
       dueDate: dueToday,
       status: 'active',
       daysOverdue: 0,
     },
-    // 7. Emprunt actif normal en cours
+    // 6. Emprunt actif normal en cours
     {
       id: 'EMPR-EST-906',
       bookId: 'EST-LIV-102',
@@ -404,13 +374,14 @@ export const createInitialLoans = (): Loan[] => {
       studentName: 'Alexandre Fontaine',
       studentEmail: 'alexandre.fontaine@usmba.ac.ma',
       studentCardId: 'CARD-EST-2024-110',
+      reservationDate: addDays(today, -2),
       requestDate: addDays(today, -2),
       borrowedDate: addDays(today, -2),
       dueDate: futureDue,
       status: 'active',
       daysOverdue: 0,
     },
-    // 8. Emprunt retourné avec succès
+    // 7. Emprunt retourné avec succès
     {
       id: 'EMPR-EST-890',
       bookId: 'EST-LIV-105',
@@ -421,6 +392,7 @@ export const createInitialLoans = (): Loan[] => {
       studentName: 'Salma El Amrani',
       studentEmail: 'salma.elamrani@usmba.ac.ma',
       studentCardId: 'CARD-EST-2024-045',
+      reservationDate: addDays(today, -18),
       requestDate: addDays(today, -18),
       borrowedDate: addDays(today, -17),
       dueDate: addDays(today, -3),
@@ -438,28 +410,19 @@ export const INITIAL_NOTIFICATIONS: Notification[] = [
   {
     id: 'NOTIF-01',
     userId: 'EST-2024-012',
-    title: 'Rappel d’échéance',
-    message: 'Votre emprunt de « 1984 » est arrivé à échéance. Merci de le restituer à la bibliothèque.',
+    title: 'Rappel de restitution',
+    message: 'Votre emprunt de « 1984 » est arrivé à échéance. Merci de bien vouloir le rapporter au comptoir de la bibliothèque.',
     createdAt: `${getSystemToday()} 09:00`,
     read: false,
     type: 'overdue',
   },
   {
     id: 'NOTIF-02',
-    userId: 'EST-2024-012',
-    title: 'Demande d’emprunt enregistrée',
-    message: 'Votre demande pour « Sapiens » est en cours de traitement par le Gérant de bibliothèque.',
-    createdAt: `${getSystemToday()} 14:30`,
-    read: true,
-    type: 'loan',
-  },
-  {
-    id: 'NOTIF-03',
     userId: 'EST-2024-045',
-    title: 'Demande acceptée !',
-    message: 'Votre demande pour « L\'Étranger » a été acceptée. Présentez-vous à la bibliothèque pour la remise physique.',
+    title: 'Réservation confirmée !',
+    message: 'Votre réservation pour « L\'Étranger » est enregistrée. Un exemplaire vous est réservé au comptoir de la bibliothèque.',
     createdAt: `${getSystemToday()} 16:00`,
     read: false,
-    type: 'loan',
+    type: 'reservation',
   },
 ];
