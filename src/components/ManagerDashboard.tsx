@@ -1,60 +1,241 @@
 import React, { useState } from 'react';
 import { useLibrary, TODAY_DATE } from '../context/LibraryContext';
 import {
-  Clock,
-  Mail,
-  QrCode,
+  BookOpen,
   LayoutDashboard,
-  Eye,
-  CheckCircle2,
+  QrCode,
+  Users,
   Package,
   CalendarCheck,
   AlertOctagon,
-  Users,
-  Send,
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  Plus,
+  Edit2,
+  Trash2,
+  Search,
+  Filter,
+  Check,
+  X,
+  Eye,
   Zap,
+  Mail,
+  ShieldAlert,
+  ArrowRight,
+  HandCoins,
+  Send,
+  FileText,
+  BadgeAlert,
 } from 'lucide-react';
 import { BorrowReturnStation } from './BorrowReturnStation';
 import { OverdueDetailModal } from './OverdueDetailModal';
-import { OverdueSeverity } from '../types';
+import { Book, BookCondition, Loan, OverdueSeverity } from '../types';
 
 export const ManagerDashboard: React.FC = () => {
   const {
     books,
+    categories,
     students,
     loans,
+    penaltyRule,
+    // Les 7 indicateurs calculés automatiquement à partir des données réelles
+    totalBooksCount,
+    totalCopiesCount,
+    availableCopiesCount,
+    borrowedCopiesCount,
+    overdueLoansCount,
+    pendingRequestsCount,
+    returnsToProcessCount,
+    // Listes filtrées
     overdueLoans,
     loansDueToday,
-    totalBooksBrought,
+    pendingRequests,
+    acceptedRequestsWaitingHandover,
+    activeLoans,
+    // Actions Gérant
+    addBook,
+    updateBook,
+    deleteOrArchiveBook,
+    addCategory,
+    acceptLoanRequest,
+    refuseLoanRequest,
+    confirmPhysicalHandover,
+    processPhysicalReturn,
+    reportOverdueToAdmin,
+    // Fiches
     selectedOverdueLoan,
     setSelectedOverdueLoan,
     selectedStudentProfile,
     setSelectedStudentProfile,
+    // Auto emails
     emailLogs,
     automaticEmailNotification,
     dismissAutoEmailNotification,
   } = useLibrary();
 
-  const [activeManagerTab, setActiveManagerTab] = useState<'dashboard' | 'scanner' | 'students'>('dashboard');
+  // Navigation onglets Gérant de bibliothèque
+  const [activeTab, setActiveTab] = useState<
+    'dashboard' | 'books' | 'requests' | 'returns' | 'scanner' | 'students'
+  >('dashboard');
+
+  // Filtre sévérité des retards
   const [severityFilter, setSeverityFilter] = useState<'all' | OverdueSeverity>('all');
 
-  // Statistiques des 3 degrés de retard :
-  // Jaune : retard léger (1 à 3 jours)
-  // Orange : retard moyen (4 à 7 jours)
-  // Rouge : retard élevé (plus de 7 jours)
+  // État formulaire nouveau livre
+  const [showAddBookModal, setShowAddBookModal] = useState(false);
+  const [editingBook, setEditingBook] = useState<Book | null>(null);
+  const [newBookCategory, setNewBookCategory] = useState(categories[0] || 'Informatique');
+  const [customCategoryInput, setCustomCategoryInput] = useState('');
+  const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
+
+  const [bookForm, setBookForm] = useState({
+    title: '',
+    author: '',
+    category: categories[0] || 'Informatique',
+    publishedYear: 2024,
+    publisher: 'Dunod',
+    isbn: '',
+    shelfLocation: 'Rayon A-1',
+    description: '',
+    summary: 'Présentation générale des principes et méthodes...',
+    tableOfContents: ['Introduction générale', 'Concepts fondamentaux', 'Études de cas'],
+    totalCopies: 3,
+    coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&auto=format&fit=crop&q=80',
+    coverColor: 'from-blue-600 to-indigo-800',
+  });
+
+  // Recherche dans la gestion des livres
+  const [bookSearchQuery, setBookSearchQuery] = useState('');
+  const [selectedBookCategoryFilter, setSelectedBookCategoryFilter] = useState<string>('all');
+
+  // État modal de retour physique
+  const [returnModalLoan, setReturnModalLoan] = useState<Loan | null>(null);
+  const [returnCondition, setReturnCondition] = useState<BookCondition>('good');
+  const [returnNotes, setReturnNotes] = useState('');
+  const [returnSuccessMessage, setReturnSuccessMessage] = useState<string | null>(null);
+
+  // État refus de demande
+  const [refusalModalLoan, setRefusalModalLoan] = useState<Loan | null>(null);
+  const [refusalReason, setRefusalReason] = useState('');
+
+  // État signalement administrateur
+  const [reportModalLoan, setReportModalLoan] = useState<Loan | null>(null);
+  const [reportReason, setReportReason] = useState('');
+
+  // Calcul des retards par degrés
   const yellowLoans = overdueLoans.filter((l) => l.severity === 'yellow');
   const orangeLoans = overdueLoans.filter((l) => l.severity === 'orange');
   const redLoans = overdueLoans.filter((l) => l.severity === 'red');
-
-  const totalOverdueCount = overdueLoans.length;
 
   const filteredOverdueLoans = overdueLoans.filter((loan) => {
     if (severityFilter === 'all') return true;
     return loan.severity === severityFilter;
   });
 
+  // Filtrage des livres pour l'inventaire
+  const filteredInventoryBooks = books
+    .filter((b) => !b.isArchived)
+    .filter((b) => {
+      const matchSearch =
+        b.title.toLowerCase().includes(bookSearchQuery.toLowerCase()) ||
+        b.author.toLowerCase().includes(bookSearchQuery.toLowerCase()) ||
+        b.isbn.toLowerCase().includes(bookSearchQuery.toLowerCase()) ||
+        b.category.toLowerCase().includes(bookSearchQuery.toLowerCase());
+      const matchCat =
+        selectedBookCategoryFilter === 'all' || b.category === selectedBookCategoryFilter;
+      return matchSearch && matchCat;
+    });
+
+  // Soumission ajout / modification de livre
+  const handleSaveBook = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingBook) {
+      updateBook(editingBook.id, {
+        title: bookForm.title,
+        author: bookForm.author,
+        category: bookForm.category,
+        publishedYear: Number(bookForm.publishedYear),
+        publisher: bookForm.publisher,
+        isbn: bookForm.isbn,
+        shelfLocation: bookForm.shelfLocation,
+        description: bookForm.description,
+        summary: bookForm.summary,
+        tableOfContents: bookForm.tableOfContents,
+        totalCopies: Number(bookForm.totalCopies),
+      });
+      setEditingBook(null);
+    } else {
+      addBook({
+        title: bookForm.title,
+        author: bookForm.author,
+        category: bookForm.category,
+        publishedYear: Number(bookForm.publishedYear),
+        publisher: bookForm.publisher,
+        isbn: bookForm.isbn || `978-2-${Date.now().toString().slice(-6)}`,
+        shelfLocation: bookForm.shelfLocation,
+        description: bookForm.description,
+        summary: bookForm.summary,
+        tableOfContents: bookForm.tableOfContents,
+        totalCopies: Number(bookForm.totalCopies),
+        coverImage: bookForm.coverImage,
+        coverColor: bookForm.coverColor,
+      });
+      setShowAddBookModal(false);
+    }
+
+    // Reset
+    setBookForm({
+      title: '',
+      author: '',
+      category: categories[0] || 'Informatique',
+      publishedYear: 2024,
+      publisher: 'Dunod',
+      isbn: '',
+      shelfLocation: 'Rayon A-1',
+      description: '',
+      summary: 'Présentation générale des principes et méthodes...',
+      tableOfContents: ['Introduction générale', 'Concepts fondamentaux', 'Études de cas'],
+      totalCopies: 3,
+      coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&auto=format&fit=crop&q=80',
+      coverColor: 'from-blue-600 to-indigo-800',
+    });
+  };
+
+  const openEditBook = (b: Book) => {
+    setEditingBook(b);
+    setBookForm({
+      title: b.title,
+      author: b.author,
+      category: b.category,
+      publishedYear: b.publishedYear,
+      publisher: b.publisher,
+      isbn: b.isbn,
+      shelfLocation: b.shelfLocation,
+      description: b.description,
+      summary: b.summary,
+      tableOfContents: b.tableOfContents,
+      totalCopies: b.totalCopies,
+      coverImage: b.coverImage,
+      coverColor: b.coverColor,
+    });
+  };
+
+  // Traitement retour physique
+  const handleConfirmReturn = () => {
+    if (!returnModalLoan) return;
+    const res = processPhysicalReturn(returnModalLoan.id, returnCondition, returnNotes);
+    if (res.success) {
+      setReturnSuccessMessage(`Restitution de « ${returnModalLoan.bookTitle} » confirmée avec succès.`);
+      setTimeout(() => setReturnSuccessMessage(null), 4000);
+      setReturnModalLoan(null);
+      setReturnNotes('');
+      setReturnCondition('good');
+    }
+  };
+
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 pb-16">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6 pb-20">
       {/* Toast d'envoi automatique de mail sans clic */}
       {automaticEmailNotification && (
         <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-4 rounded-2xl shadow-xl border border-blue-400/30 flex items-start sm:items-center justify-between gap-3 animate-in fade-in slide-in-from-top duration-300">
@@ -64,7 +245,7 @@ export const ManagerDashboard: React.FC = () => {
             </div>
             <div>
               <h4 className="font-bold text-sm text-white">
-                Envoi de mail automatique sans clic effectué
+                Système automatique d'envoi de mails actif
               </h4>
               <p className="text-xs text-blue-200 mt-0.5">
                 {automaticEmailNotification}
@@ -80,345 +261,470 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* En-tête Gérant & Sélecteur d'onglets de gestion */}
-      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Message succès restitution */}
+      {returnSuccessMessage && (
+        <div className="bg-emerald-600 text-white p-4 rounded-2xl shadow-lg flex items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center space-x-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-200" />
+            <span className="text-xs sm:text-sm font-bold">{returnSuccessMessage}</span>
+          </div>
+          <button
+            onClick={() => setReturnSuccessMessage(null)}
+            className="text-xs text-emerald-200 hover:text-white"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
+      {/* En-tête Gérant & Barre d'onglets professionnelle */}
+      <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <span className="text-xs font-bold uppercase tracking-wider text-blue-600 block">
-            Espace Gérant de Bibliothèque
-          </span>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight mt-0.5">
-            Tableau de Bord & Suivi des Retours
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+              Gérant de bibliothèque
+            </span>
+            <span className="text-xs text-slate-400 font-mono">USMBA • EST</span>
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 tracking-tight mt-1">
+            Tableau de Bord & Gestion de la Bibliothèque
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Suivi des livres apportés, des échéances du jour et des retards avec codes couleurs.
+            Indicateurs en temps réel, inventaire des exemplaires, gestion des flux d'emprunt et des pénalités.
           </p>
         </div>
 
-        {/* Tab switch : Dashboard, Poste de Scan, Profils Étudiants */}
-        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0 flex-wrap gap-1">
+        {/* Tab switch */}
+        <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200 shrink-0 flex-wrap gap-1 text-xs font-bold">
           <button
-            onClick={() => setActiveManagerTab('dashboard')}
-            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeManagerTab === 'dashboard'
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'dashboard'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <LayoutDashboard className="w-4 h-4" />
-            <span>Dashboard & Retards</span>
+            <LayoutDashboard className="w-3.5 h-3.5" />
+            <span>Dashboard</span>
           </button>
 
           <button
-            onClick={() => setActiveManagerTab('scanner')}
-            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeManagerTab === 'scanner'
+            onClick={() => setActiveTab('books')}
+            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'books'
+                ? 'bg-white text-blue-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Livres & Stock ({totalBooksCount})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('requests')}
+            className={`relative flex items-center space-x-1.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'requests'
+                ? 'bg-white text-blue-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Demandes ({pendingRequestsCount + acceptedRequestsWaitingHandover.length})</span>
+            {pendingRequestsCount > 0 && (
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('returns')}
+            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'returns'
+                ? 'bg-white text-blue-700 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <CalendarCheck className="w-3.5 h-3.5" />
+            <span>Retours ({returnsToProcessCount})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('scanner')}
+            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'scanner'
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <QrCode className="w-4 h-4" />
-            <span>Poste de Scan (Emprunt/Retour)</span>
+            <QrCode className="w-3.5 h-3.5" />
+            <span>Poste de Scan</span>
           </button>
 
           <button
-            onClick={() => setActiveManagerTab('students')}
-            className={`flex items-center space-x-1.5 px-3.5 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeManagerTab === 'students'
+            onClick={() => setActiveTab('students')}
+            className={`flex items-center space-x-1.5 px-3 py-2 rounded-xl transition-all cursor-pointer ${
+              activeTab === 'students'
                 ? 'bg-white text-blue-700 shadow-xs'
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            <Users className="w-4 h-4" />
-            <span>Profils Étudiants ({students.length})</span>
+            <Users className="w-3.5 h-3.5" />
+            <span>Étudiants ({students.length})</span>
           </button>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* ONGLET 1 : DASHBOARD STATISTIQUES                                         */}
-      {/* - Combien de livres sont apportés                                         */}
-      {/* - Les livres qui doivent retourner aujourd'hui                           */}
-      {/* - Voir qui n'ont pas remis les livres (retards avec couleurs)             */}
-      {/* - Envoi automatique de mail sans clic                                     */}
+      {/* LES 7 INDICATEURS CALCULÉS AUTOMATIQUEMENT (Strictement réels, non codés en dur) */}
       {/* ========================================================================= */}
-      {activeManagerTab === 'dashboard' && (
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+        {/* 1. Nombre total de livres */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">
+            Titres au total
+          </span>
+          <span className="text-2xl font-black text-slate-900 mt-1 block">
+            {totalBooksCount}
+          </span>
+          <span className="text-[10px] text-slate-400">Catalogue actif</span>
+        </div>
+
+        {/* 2. Nombre total d'exemplaires */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">
+            Total exemplaires
+          </span>
+          <span className="text-2xl font-black text-slate-900 mt-1 block">
+            {totalCopiesCount}
+          </span>
+          <span className="text-[10px] text-slate-400">Volume physique</span>
+        </div>
+
+        {/* 3. Nombre d'exemplaires disponibles */}
+        <div className="bg-white p-4 rounded-2xl border border-emerald-200 bg-emerald-50/20 shadow-2xs">
+          <span className="text-[10px] text-emerald-800 font-bold uppercase tracking-wider block">
+            Disponibles
+          </span>
+          <span className="text-2xl font-black text-emerald-600 mt-1 block">
+            {availableCopiesCount}
+          </span>
+          <span className="text-[10px] text-emerald-700">En rayon</span>
+        </div>
+
+        {/* 4. Nombre d'exemplaires empruntés */}
+        <div className="bg-white p-4 rounded-2xl border border-blue-200 bg-blue-50/20 shadow-2xs">
+          <span className="text-[10px] text-blue-800 font-bold uppercase tracking-wider block">
+            Empruntés
+          </span>
+          <span className="text-2xl font-black text-blue-600 mt-1 block">
+            {borrowedCopiesCount}
+          </span>
+          <span className="text-[10px] text-blue-700">En circulation</span>
+        </div>
+
+        {/* 5. Nombre d'emprunts en retard */}
+        <div className="bg-white p-4 rounded-2xl border border-rose-200 bg-rose-50/20 shadow-2xs">
+          <span className="text-[10px] text-rose-800 font-bold uppercase tracking-wider block">
+            En retard
+          </span>
+          <span className="text-2xl font-black text-rose-600 mt-1 block">
+            {overdueLoansCount}
+          </span>
+          <span className="text-[10px] text-rose-700">Échéance dépassée</span>
+        </div>
+
+        {/* 6. Nombre de demandes d'emprunt en attente */}
+        <div className="bg-white p-4 rounded-2xl border border-amber-200 bg-amber-50/20 shadow-2xs">
+          <span className="text-[10px] text-amber-800 font-bold uppercase tracking-wider block">
+            Demandes attente
+          </span>
+          <span className="text-2xl font-black text-amber-600 mt-1 block">
+            {pendingRequestsCount}
+          </span>
+          <span className="text-[10px] text-amber-700">À valider</span>
+        </div>
+
+        {/* 7. Nombre de retours à traiter */}
+        <div className="bg-white p-4 rounded-2xl border border-indigo-200 bg-indigo-50/20 shadow-2xs">
+          <span className="text-[10px] text-indigo-800 font-bold uppercase tracking-wider block">
+            Retours à traiter
+          </span>
+          <span className="text-2xl font-black text-indigo-700 mt-1 block">
+            {returnsToProcessCount}
+          </span>
+          <span className="text-[10px] text-indigo-600">Aujourd'hui + retard</span>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* ONGLET 1 : DASHBOARD STATISTIQUES & RETARDS                               */}
+      {/* ========================================================================= */}
+      {activeTab === 'dashboard' && (
         <div className="space-y-6">
-          {/* STATS PRINCIPALES */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* 1. Combien de livres sont apportés */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
-              <div>
-                <span className="text-xs text-slate-500 font-bold uppercase tracking-wider block">
-                  Livres apportés (Total)
-                </span>
-                <span className="text-3xl font-black text-slate-900 mt-1 block">
-                  {totalBooksBrought}
-                </span>
-                <span className="text-[11px] text-slate-500">
-                  {books.length} titres réels
-                </span>
-              </div>
-              <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-700 flex items-center justify-center">
-                <Package className="w-6 h-6" />
-              </div>
-            </div>
-
-            {/* 2. Livres qui doivent retourner aujourd'hui */}
-            <div className="bg-white p-5 rounded-2xl border border-blue-200 bg-blue-50/30 shadow-xs flex items-center justify-between">
-              <div>
-                <span className="text-xs text-blue-900 font-bold uppercase tracking-wider block">
-                  À retourner aujourd'hui
-                </span>
-                <span className="text-3xl font-black text-blue-700 mt-1 block">
-                  {loansDueToday.length}
-                </span>
-                <span className="text-[11px] text-blue-800">
-                  Échéance : {TODAY_DATE}
-                </span>
-              </div>
-              <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-800 flex items-center justify-center">
-                <CalendarCheck className="w-6 h-6" />
-              </div>
-            </div>
-
-            {/* 3. Retards globaux (qui n'ont pas remis les livres) */}
-            <div className="bg-white p-5 rounded-2xl border border-rose-200 bg-rose-50/20 shadow-xs flex items-center justify-between">
-              <div>
-                <span className="text-xs text-rose-900 font-bold uppercase tracking-wider block">
-                  Non remis dans les délais
-                </span>
-                <span className="text-3xl font-black text-rose-600 mt-1 block">
-                  {totalOverdueCount}
-                </span>
-                <span className="text-[11px] text-rose-700 font-medium">
-                  Retards actifs
-                </span>
-              </div>
-              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-700 flex items-center justify-center">
-                <AlertOctagon className="w-6 h-6" />
-              </div>
-            </div>
-
-            {/* 4. Disponibles en rayon */}
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
-              <div>
-                <span className="text-xs text-slate-500 font-bold uppercase tracking-wider block">
-                  Disponibles en rayon
-                </span>
-                <span className="text-3xl font-black text-emerald-600 mt-1 block">
-                  {books.reduce((acc, b) => acc + b.availableCopies, 0)}
-                </span>
-                <span className="text-[11px] text-slate-500">
-                  En stock prêt pour prêt
-                </span>
-              </div>
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION : LIVRES QUI DOIVENT RETOURNER AUJOURD'HUI */}
-          {loansDueToday.length > 0 && (
-            <div className="bg-white rounded-2xl border border-blue-200 shadow-xs p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center space-x-2">
-                  <CalendarCheck className="w-5 h-5 text-blue-600" />
-                  <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">
-                    Exemplaires dont l'échéance de retour est AUJOURD'HUI ({loansDueToday.length})
-                  </h3>
+          {/* SECTION : ÉCHÉANCES DU JOUR (2026-11-12) */}
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-blue-200 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <CalendarCheck className="w-4 h-4" />
                 </div>
-                <span className="text-xs font-mono text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md">
-                  Date : {TODAY_DATE}
-                </span>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm sm:text-base">
+                    Exemplaires à retourner aujourd'hui ({loansDueToday.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Date du jour : <strong className="text-blue-700">{TODAY_DATE}</strong>
+                  </p>
+                </div>
               </div>
+              <span className="text-xs bg-blue-50 text-blue-800 font-bold px-3 py-1 rounded-full border border-blue-200">
+                {loansDueToday.length} restitution(s) attendue(s)
+              </span>
+            </div>
 
+            {loansDueToday.length === 0 ? (
+              <p className="text-xs text-slate-400 py-3 italic">
+                Aucun retour programmé précisément pour la date d'aujourd'hui.
+              </p>
+            ) : (
               <div className="divide-y divide-slate-100">
                 {loansDueToday.map((loan) => (
-                  <div key={loan.id} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div
+                    key={loan.id}
+                    className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                  >
                     <div>
-                      <span className="font-bold text-slate-900">« {loan.bookTitle} »</span>
-                      <span className="text-slate-500 ml-2">par {loan.bookAuthor}</span>
+                      <span className="font-bold text-slate-900 text-sm block sm:inline">
+                        « {loan.bookTitle} »
+                      </span>
+                      <span className="text-slate-500 sm:ml-2">par {loan.bookAuthor}</span>
                     </div>
                     <div className="flex items-center space-x-3 text-slate-600">
-                      <span>Emprunteur : <strong>{loan.studentName}</strong> ({loan.studentEmail})</span>
+                      <span>
+                        Emprunteur : <strong>{loan.studentName}</strong> ({loan.studentEmail})
+                      </span>
                       <button
-                        onClick={() => setSelectedOverdueLoan(loan)}
-                        className="text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
+                        onClick={() => {
+                          setReturnModalLoan(loan);
+                        }}
+                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg cursor-pointer"
                       >
-                        Voir fiche
+                        Enregistrer retour
                       </button>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
-          {/* 3 DEGRÉS DE RETARD AFFICHÉS AVEC DES COULEURS (Jaune, Orange, Rouge) */}
+          {/* 3 DEGRÉS DE RETARD AVEC COULEURS JAUNE, ORANGE, ROUGE */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* Jaune : Retard léger (1 à 3 jours) */}
+            {/* Jaune : 1 à 3 jours */}
             <div
               onClick={() => setSeverityFilter(severityFilter === 'yellow' ? 'all' : 'yellow')}
-              className={`p-5 rounded-2xl border transition-all cursor-pointer ${
+              className={`p-5 rounded-3xl border transition-all cursor-pointer ${
                 severityFilter === 'yellow'
-                  ? 'bg-amber-100/70 border-amber-500 ring-2 ring-amber-400/40 shadow-md'
-                  : 'bg-amber-50/70 border-amber-200 hover:border-amber-300 shadow-xs'
+                  ? 'bg-amber-100/80 border-amber-500 ring-2 ring-amber-400/40 shadow-md'
+                  : 'bg-amber-50/70 border-amber-200 hover:border-amber-300 shadow-2xs'
               }`}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-500" />
                     <span className="text-xs font-bold text-amber-900 uppercase tracking-wider">
                       Retard léger (Jaune)
                     </span>
                   </div>
-                  <span className="text-3xl font-black text-amber-950 mt-1 block">
+                  <span className="text-3xl font-black text-amber-950 mt-1.5 block">
                     {yellowLoans.length}
                   </span>
-                  <span className="text-[11px] text-amber-800 font-medium">
-                    1 à 3 jours de retard
+                  <span className="text-xs text-amber-800 font-medium">
+                    1 à 3 jours de retard • 5 MAD/jour
                   </span>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-amber-200 text-amber-900 flex items-center justify-center font-bold text-xs">
+                <div className="w-12 h-12 rounded-2xl bg-amber-200/80 text-amber-950 flex items-center justify-center font-black text-xs">
                   JAUNE
                 </div>
               </div>
             </div>
 
-            {/* Orange : Retard moyen (4 à 7 jours) */}
+            {/* Orange : 4 à 7 jours */}
             <div
               onClick={() => setSeverityFilter(severityFilter === 'orange' ? 'all' : 'orange')}
-              className={`p-5 rounded-2xl border transition-all cursor-pointer ${
+              className={`p-5 rounded-3xl border transition-all cursor-pointer ${
                 severityFilter === 'orange'
-                  ? 'bg-orange-100/70 border-orange-500 ring-2 ring-orange-400/40 shadow-md'
-                  : 'bg-orange-50/70 border-orange-200 hover:border-orange-300 shadow-xs'
+                  ? 'bg-orange-100/80 border-orange-500 ring-2 ring-orange-400/40 shadow-md'
+                  : 'bg-orange-50/70 border-orange-200 hover:border-orange-300 shadow-2xs'
               }`}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
                     <span className="text-xs font-bold text-orange-900 uppercase tracking-wider">
                       Retard moyen (Orange)
                     </span>
                   </div>
-                  <span className="text-3xl font-black text-orange-950 mt-1 block">
+                  <span className="text-3xl font-black text-orange-950 mt-1.5 block">
                     {orangeLoans.length}
                   </span>
-                  <span className="text-[11px] text-orange-800 font-medium">
-                    4 à 7 jours de retard
+                  <span className="text-xs text-orange-800 font-medium">
+                    4 à 7 jours de retard • Relance
                   </span>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-orange-200 text-orange-900 flex items-center justify-center font-bold text-xs">
+                <div className="w-12 h-12 rounded-2xl bg-orange-200/80 text-orange-950 flex items-center justify-center font-black text-xs">
                   ORANGE
                 </div>
               </div>
             </div>
 
-            {/* Rouge : Retard élevé (+ de 7 jours) */}
+            {/* Rouge : Plus de 7 jours */}
             <div
               onClick={() => setSeverityFilter(severityFilter === 'red' ? 'all' : 'red')}
-              className={`p-5 rounded-2xl border transition-all cursor-pointer ${
+              className={`p-5 rounded-3xl border transition-all cursor-pointer ${
                 severityFilter === 'red'
-                  ? 'bg-rose-100/70 border-rose-500 ring-2 ring-rose-400/40 shadow-md'
-                  : 'bg-rose-50/70 border-rose-200 hover:border-rose-300 shadow-xs'
+                  ? 'bg-rose-100/80 border-rose-500 ring-2 ring-rose-400/40 shadow-md'
+                  : 'bg-rose-50/70 border-rose-200 hover:border-rose-300 shadow-2xs'
               }`}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="flex items-center space-x-1.5">
+                  <div className="flex items-center space-x-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-pulse" />
                     <span className="text-xs font-bold text-rose-900 uppercase tracking-wider">
                       Retard élevé (Rouge)
                     </span>
                   </div>
-                  <span className="text-3xl font-black text-rose-950 mt-1 block">
+                  <span className="text-3xl font-black text-rose-950 mt-1.5 block">
                     {redLoans.length}
                   </span>
-                  <span className="text-[11px] text-rose-800 font-medium">
-                    + de 7 jours de retard
+                  <span className="text-xs text-rose-800 font-medium">
+                    &gt; 7 jours • Signalement requis
                   </span>
                 </div>
-                <div className="w-10 h-10 rounded-xl bg-rose-200 text-rose-900 flex items-center justify-center font-bold text-xs">
+                <div className="w-12 h-12 rounded-2xl bg-rose-200/80 text-rose-950 flex items-center justify-center font-black text-xs">
                   ROUGE
                 </div>
               </div>
             </div>
           </div>
 
-          {/* BANDEAU ENVOI AUTOMATIQUE DES MAILS SANS CLIC */}
-          <div className="bg-slate-900 rounded-2xl p-5 text-white shadow-lg flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center space-x-2 text-emerald-400 text-xs font-semibold uppercase tracking-wider">
-                <Zap className="w-4 h-4" />
-                <span>Service d'envoi automatique de mails actif</span>
+          {/* RÈGLES DE PÉNALITÉ INSTITUTIONNELLES (Fixées par l'administration - Lecture seule pour le Gérant) */}
+          <div className="bg-slate-900 rounded-3xl p-5 sm:p-6 text-white border border-slate-800 shadow-lg">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+                  <HandCoins className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center space-x-2">
+                    <h3 className="font-bold text-base text-white">
+                      Règles de Pénalité Institutionnelles
+                    </h3>
+                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                      Lecture seule • Administration
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Fixées par la direction de l'EST USMBA. Le Gérant de bibliothèque applique ces barèmes sans pouvoir les modifier.
+                  </p>
+                </div>
               </div>
-              <h3 className="text-base sm:text-lg font-bold">
-                Relance automatique des retards sans aucun clic
-              </h3>
-              <p className="text-xs text-slate-300 max-w-xl">
-                Le système biblioEST détecte les retards et expédie automatiquement les courriels de relance aux étudiants dès l'ouverture de l'espace gérant.
-              </p>
+
+              <span className="text-xs text-slate-400 italic">
+                Entrée en vigueur : {penaltyRule.effectiveDate} ({penaltyRule.definedBy})
+              </span>
             </div>
 
-            <div className="flex items-center space-x-2 text-xs bg-slate-800/80 border border-slate-700 py-2 px-3.5 rounded-xl shrink-0">
-              <Mail className="w-4 h-4 text-blue-400" />
-              <span>{emailLogs.length} vague{emailLogs.length > 1 ? 's' : ''} automatique{emailLogs.length > 1 ? 's' : ''} expédiée{emailLogs.length > 1 ? 's' : ''}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-xs">
+              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">
+                  Indemnité de retard journalière
+                </span>
+                <span className="text-lg font-black text-amber-400 mt-1 block">
+                  {penaltyRule.feePerDayMad} MAD / jour
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Calculée automatiquement sur chaque jour dépassé
+                </span>
+              </div>
+
+              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">
+                  Exemplaire restitué endommagé
+                </span>
+                <span className="text-lg font-black text-orange-400 mt-1 block">
+                  Forfait {penaltyRule.damagedBookFeeMad} MAD
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Frais de reliure ou réhabilitation
+                </span>
+              </div>
+
+              <div className="bg-slate-800/80 p-3.5 rounded-2xl border border-slate-700">
+                <span className="text-slate-400 text-[10px] uppercase font-bold block">
+                  Exemplaire perdu ou détruit
+                </span>
+                <span className="text-lg font-black text-rose-400 mt-1 block">
+                  Forfait {penaltyRule.lostBookFeeMad} MAD
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  Remplacement à neuf de l'ouvrage
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* LISTE DÉTAILLÉE DES ÉTUDIANTS QUI N'ONT PAS REMIS LES LIVRES */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          {/* LISTE DÉTAILLÉE DES EMPRUNTS EN RETARD */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
                 <h3 className="font-extrabold text-base text-slate-900">
-                  Étudiants en retard de remise d'exemplaires ({filteredOverdueLoans.length})
+                  Étudiants en retard de restitution ({filteredOverdueLoans.length})
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Cliquez sur un étudiant pour ouvrir le détail complet de sa fiche et du livre emprunté.
+                  Pénalités calculées selon les règles administratives officielles.
                 </p>
               </div>
 
-              {/* Filtres par sévérité */}
-              <div className="flex items-center space-x-1.5 overflow-x-auto text-xs">
+              <div className="flex items-center space-x-1 text-xs">
                 <button
                   onClick={() => setSeverityFilter('all')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-colors ${
                     severityFilter === 'all'
                       ? 'bg-slate-900 text-white'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  Tous ({totalOverdueCount})
+                  Tous ({overdueLoans.length})
                 </button>
                 <button
                   onClick={() => setSeverityFilter('yellow')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-colors ${
                     severityFilter === 'yellow'
                       ? 'bg-amber-500 text-white'
-                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                      : 'bg-amber-50 text-amber-800'
                   }`}
                 >
                   Jaune ({yellowLoans.length})
                 </button>
                 <button
                   onClick={() => setSeverityFilter('orange')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-colors ${
                     severityFilter === 'orange'
                       ? 'bg-orange-500 text-white'
-                      : 'bg-orange-50 text-orange-800 hover:bg-orange-100'
+                      : 'bg-orange-50 text-orange-800'
                   }`}
                 >
                   Orange ({orangeLoans.length})
                 </button>
                 <button
                   onClick={() => setSeverityFilter('red')}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl font-bold cursor-pointer transition-colors ${
                     severityFilter === 'red'
                       ? 'bg-rose-600 text-white'
-                      : 'bg-rose-50 text-rose-800 hover:bg-rose-100'
+                      : 'bg-rose-50 text-rose-800'
                   }`}
                 >
                   Rouge ({redLoans.length})
@@ -427,112 +733,439 @@ export const ManagerDashboard: React.FC = () => {
             </div>
 
             <div className="divide-y divide-slate-100">
-              {filteredOverdueLoans.map((loan) => {
-                const student = students.find((s) => s.id === loan.studentId);
-                const book = books.find((b) => b.id === loan.bookId);
-
-                return (
-                  <div
-                    key={loan.id}
-                    onClick={() => setSelectedOverdueLoan(loan)}
-                    className="p-4 sm:px-6 hover:bg-slate-50/80 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer group"
-                  >
-                    <div className="flex items-start space-x-3.5 min-w-0 flex-1">
-                      <img
-                        src={student?.avatar}
-                        alt={loan.studentName}
-                        className="w-10 h-10 rounded-xl object-cover ring-1 ring-slate-200 shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center space-x-2">
-                          <span className="font-extrabold text-sm text-slate-900 group-hover:text-blue-600 transition-colors">
-                            {loan.studentName}
+              {filteredOverdueLoans.map((loan) => (
+                <div
+                  key={loan.id}
+                  className="p-4 sm:px-6 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                >
+                  <div className="flex items-start space-x-3.5">
+                    <div
+                      className={`w-3 h-10 rounded-full shrink-0 ${
+                        loan.severity === 'red'
+                          ? 'bg-rose-600'
+                          : loan.severity === 'orange'
+                          ? 'bg-orange-500'
+                          : 'bg-amber-500'
+                      }`}
+                    />
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-extrabold text-sm text-slate-900">
+                          {loan.studentName}
+                        </span>
+                        <span className="text-[11px] font-mono text-slate-400">
+                          {loan.studentEmail}
+                        </span>
+                        {loan.reportedToAdmin && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                            Signalé à l'administration
                           </span>
-                          <span className="text-[11px] font-mono text-slate-400">
-                            {loan.studentEmail}
-                          </span>
-                        </div>
-                        <div className="text-xs text-slate-600 mt-0.5 flex flex-wrap items-center gap-x-2">
-                          <span className="font-bold text-slate-800">
-                            « {loan.bookTitle} »
-                          </span>
-                          <span className="text-slate-400">·</span>
-                          <span className="text-slate-500">{loan.bookAuthor}</span>
-                          <span className="text-slate-400">·</span>
-                          <span className="text-slate-400 font-mono">Carte : {loan.studentCardId}</span>
-                        </div>
+                        )}
+                      </div>
+                      <div className="text-slate-600 mt-1 flex flex-wrap items-center gap-x-2">
+                        <span className="font-bold text-slate-900">« {loan.bookTitle} »</span>
+                        <span className="text-slate-400">·</span>
+                        <span>Échéance dépassée depuis le {loan.dueDate}</span>
+                        <span className="text-slate-400">·</span>
+                        <span className="font-bold text-rose-700">
+                          {loan.daysOverdue} jour{loan.daysOverdue > 1 ? 's' : ''} de retard
+                        </span>
                       </div>
                     </div>
-
-                    <div className="flex items-center space-x-3 shrink-0 self-end sm:self-center">
-                      {loan.severity === 'yellow' && (
-                        <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-950 border border-amber-300">
-                          <span className="w-2 h-2 rounded-full bg-amber-500" />
-                          <span>Jaune : {loan.daysOverdue}j retard</span>
-                        </span>
-                      )}
-                      {loan.severity === 'orange' && (
-                        <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-orange-100 text-orange-950 border border-orange-300">
-                          <span className="w-2 h-2 rounded-full bg-orange-500" />
-                          <span>Orange : {loan.daysOverdue}j retard</span>
-                        </span>
-                      )}
-                      {loan.severity === 'red' && (
-                        <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-950 border border-rose-300">
-                          <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
-                          <span>Rouge : {loan.daysOverdue}j retard</span>
-                        </span>
-                      )}
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedOverdueLoan(loan);
-                        }}
-                        className="inline-flex items-center space-x-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg shadow-2xs transition-colors cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>Détail</span>
-                      </button>
-                    </div>
                   </div>
-                );
-              })}
+
+                  <div className="flex items-center space-x-2.5 self-end sm:self-center shrink-0">
+                    {/* Pénalité calculée */}
+                    <div className="bg-slate-100 px-3 py-1.5 rounded-xl text-center">
+                      <span className="text-[10px] uppercase font-bold text-slate-500 block">
+                        Pénalité calculée
+                      </span>
+                      <span className="font-extrabold text-slate-900">
+                        {loan.penaltyFeeMad || loan.daysOverdue * 5} MAD
+                      </span>
+                    </div>
+
+                    {/* Bouton de réception retour physique */}
+                    <button
+                      onClick={() => setReturnModalLoan(loan)}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors cursor-pointer"
+                    >
+                      Réceptionner
+                    </button>
+
+                    {/* Signaler à l'administrateur */}
+                    <button
+                      onClick={() => {
+                        setReportModalLoan(loan);
+                        setReportReason(`Retard prolongé de ${loan.daysOverdue} jours non régularisé.`);
+                      }}
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-colors cursor-pointer"
+                      title="Signaler à l'administrateur"
+                    >
+                      Signaler
+                    </button>
+
+                    <button
+                      onClick={() => setSelectedOverdueLoan(loan)}
+                      className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg"
+                      title="Voir détail"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       )}
 
       {/* ========================================================================= */}
-      {/* ONGLET 2 : POSTE DE SCAN D'EMPRUNT ET RETOUR AUTOMATIQUE                  */}
+      {/* ONGLET 2 : GESTION DES LIVRES ET INVENTAIRE DES EXEMPLAIRES                 */}
+      {/* - totalCopies = availableCopies + borrowedCopies vérifié en temps réel    */}
       {/* ========================================================================= */}
-      {activeManagerTab === 'scanner' && (
-        <BorrowReturnStation />
+      {activeTab === 'books' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-extrabold text-slate-900">
+                Gestion des Ouvrages & Cohérence du Stock
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Règle stricte respectée : totalCopies ({totalCopiesCount}) = disponibles ({availableCopiesCount}) + empruntés ({borrowedCopiesCount}).
+              </p>
+            </div>
+
+            <button
+              onClick={() => {
+                setEditingBook(null);
+                setShowAddBookModal(true);
+              }}
+              className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-2xl shadow-sm transition-all cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Ajouter un nouvel ouvrage</span>
+            </button>
+          </div>
+
+          {/* Recherche & Filtres par catégorie */}
+          <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={bookSearchQuery}
+                onChange={(e) => setBookSearchQuery(e.target.value)}
+                placeholder="Rechercher par titre, auteur, ISBN ou catégorie..."
+                className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-hidden focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+              />
+            </div>
+
+            <div className="flex items-center space-x-2 shrink-0">
+              <span className="text-xs font-bold text-slate-500">Catégorie :</span>
+              <select
+                value={selectedBookCategoryFilter}
+                onChange={(e) => setSelectedBookCategoryFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-xs font-semibold rounded-xl px-3 py-2.5"
+              >
+                <option value="all">Toutes les catégories ({categories.length})</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Tableau des ouvrages */}
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                    <th className="py-3.5 px-4 sm:px-6">Ouvrage & Auteur</th>
+                    <th className="py-3.5 px-3">Catégorie</th>
+                    <th className="py-3.5 px-3">Édition / ISBN</th>
+                    <th className="py-3.5 px-3 text-center">Total</th>
+                    <th className="py-3.5 px-3 text-center">Disponibles</th>
+                    <th className="py-3.5 px-3 text-center">Empruntés</th>
+                    <th className="py-3.5 px-4 sm:px-6 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredInventoryBooks.map((b) => (
+                    <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3.5 px-4 sm:px-6">
+                        <div className="font-extrabold text-slate-900 text-sm">{b.title}</div>
+                        <div className="text-slate-500 text-xs">{b.author}</div>
+                        <div className="text-[11px] font-mono text-slate-400">Cote : {b.shelfLocation}</div>
+                      </td>
+                      <td className="py-3.5 px-3">
+                        <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-bold text-[11px] border border-blue-200">
+                          {b.category}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3 text-slate-600">
+                        <div>{b.publishedYear} • {b.publisher}</div>
+                        <div className="font-mono text-[10px] text-slate-400">{b.isbn}</div>
+                      </td>
+                      <td className="py-3.5 px-3 text-center font-black text-slate-900 text-sm">
+                        {b.totalCopies}
+                      </td>
+                      <td className="py-3.5 px-3 text-center">
+                        <span
+                          className={`font-black text-sm px-2.5 py-0.5 rounded-full ${
+                            b.availableCopies > 0
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-rose-50 text-rose-700'
+                          }`}
+                        >
+                          {b.availableCopies}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-3 text-center font-black text-blue-600 text-sm">
+                        {b.borrowedCopies}
+                      </td>
+                      <td className="py-3.5 px-4 sm:px-6 text-right space-x-1.5 whitespace-nowrap">
+                        <button
+                          onClick={() => openEditBook(b)}
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                          title="Modifier les exemplaires ou détails"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteOrArchiveBook(b.id)}
+                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title="Archiver cet ouvrage"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ========================================================================= */}
-      {/* ONGLET 3 : PROFIL DES ÉTUDIANTS                                           */}
+      {/* ONGLET 3 : DEMANDES D'EMPRUNT (En attente + Acceptées pour remise)          */}
       {/* ========================================================================= */}
-      {activeManagerTab === 'students' && (
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs">
+      {activeTab === 'requests' && (
+        <div className="space-y-6">
+          {/* Section 1 : Demandes en attente de décision */}
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  1. Demandes d'emprunt en attente ({pendingRequests.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  L'étudiant a demandé l'ouvrage. Acceptez ou refusez avec un motif.
+                </p>
+              </div>
+              <span className="text-xs bg-amber-50 text-amber-800 font-bold px-3 py-1 rounded-full border border-amber-200">
+                {pendingRequests.length} à traiter
+              </span>
+            </div>
+
+            {pendingRequests.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 italic">
+                Aucune nouvelle demande d'emprunt en attente.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {pendingRequests.map((req) => (
+                  <div
+                    key={req.id}
+                    className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div>
+                      <div className="font-extrabold text-sm text-slate-900">
+                        « {req.bookTitle} »
+                      </div>
+                      <div className="text-slate-600 mt-0.5">
+                        Demandeur : <strong>{req.studentName}</strong> ({req.studentEmail}) • Carte : {req.studentCardId}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        Date de demande : {req.requestDate || TODAY_DATE}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <button
+                        onClick={() => acceptLoanRequest(req.id)}
+                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-colors cursor-pointer flex items-center space-x-1"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Accepter la demande</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setRefusalModalLoan(req);
+                          setRefusalReason('Exemplaire réservé pour consultation sur place ou maintenance.');
+                        }}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 font-bold rounded-xl transition-colors cursor-pointer flex items-center space-x-1"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        <span>Refuser</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Section 2 : Demandes acceptées en attente de remise physique */}
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-extrabold text-base text-slate-900">
+                  2. Demandes acceptées en attente de remise physique ({acceptedRequestsWaitingHandover.length})
+                </h3>
+                <p className="text-xs text-slate-500">
+                  L'étudiant doit se présenter au comptoir. Confirmez la remise physique pour activer l'emprunt et décrémenter le stock.
+                </p>
+              </div>
+              <span className="text-xs bg-blue-50 text-blue-800 font-bold px-3 py-1 rounded-full border border-blue-200">
+                {acceptedRequestsWaitingHandover.length} en attente de retrait
+              </span>
+            </div>
+
+            {acceptedRequestsWaitingHandover.length === 0 ? (
+              <p className="text-xs text-slate-400 py-4 italic">
+                Aucune demande acceptée en attente de remise au comptoir.
+              </p>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {acceptedRequestsWaitingHandover.map((req) => (
+                  <div
+                    key={req.id}
+                    className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div>
+                      <div className="font-extrabold text-sm text-slate-900">
+                        « {req.bookTitle} »
+                      </div>
+                      <div className="text-slate-600 mt-0.5">
+                        Étudiant : <strong>{req.studentName}</strong> ({req.studentEmail}) • Carte : {req.studentCardId}
+                      </div>
+                      <div className="text-[11px] text-emerald-700 font-semibold mt-0.5">
+                        Statut : Accepté • Prêt pour remise physique
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => confirmPhysicalHandover(req.id)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center space-x-1.5 shrink-0"
+                    >
+                      <HandCoins className="w-4 h-4" />
+                      <span>Confirmer la remise physique du livre</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ONGLET 4 : GESTION DES RETOURS PHYSIQUES                                   */}
+      {/* ========================================================================= */}
+      {activeTab === 'returns' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs">
             <h3 className="font-extrabold text-base text-slate-900">
-              Profils des Étudiants Inscrits
+              Traitement des Retours Physiques d'Exemplaires
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Suivi des coordonnées, cartes d'étudiant et exemplaires actuellement empruntés.
+              Vérifiez l'état physique de l'ouvrage (Bon état, Endommagé, Perdu) et confirmez la réintégration au stock.
+            </p>
+          </div>
+
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
+              <span className="font-extrabold text-slate-900 text-sm">
+                Emprunts actifs en circulation ({activeLoans.length})
+              </span>
+              <span className="text-xs text-slate-500">
+                Incrémentation automatique du stock dès validation
+              </span>
+            </div>
+
+            <div className="divide-y divide-slate-100">
+              {activeLoans.map((loan) => (
+                <div
+                  key={loan.id}
+                  className="p-4 sm:px-6 hover:bg-slate-50 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                >
+                  <div>
+                    <div className="font-extrabold text-sm text-slate-900">
+                      « {loan.bookTitle} »
+                    </div>
+                    <div className="text-slate-600 mt-0.5">
+                      Emprunté par <strong>{loan.studentName}</strong> ({loan.studentEmail}) • Carte : {loan.studentCardId}
+                    </div>
+                    <div className="flex items-center space-x-2 text-[11px] text-slate-400 mt-0.5">
+                      <span>Date emprunt : {loan.borrowedDate || loan.requestDate}</span>
+                      <span>·</span>
+                      <span className={loan.daysOverdue > 0 ? 'text-rose-600 font-bold' : ''}>
+                        Date limite : {loan.dueDate} {loan.daysOverdue > 0 ? `(${loan.daysOverdue}j retard)` : ''}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setReturnModalLoan(loan)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center space-x-1.5 shrink-0"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Enregistrer la réception physique</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ONGLET 5 : POSTE DE SCAN QR                                               */}
+      {/* ========================================================================= */}
+      {activeTab === 'scanner' && <BorrowReturnStation />}
+
+      {/* ========================================================================= */}
+      {/* ONGLET 6 : PROFILS DES ÉTUDIANTS                                          */}
+      {/* ========================================================================= */}
+      {activeTab === 'students' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs">
+            <h3 className="font-extrabold text-base text-slate-900">
+              Fiches des Étudiants Inscrits
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Vérification de la limite stricte de 3 livres maximum par étudiant.
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {students.map((student) => {
               const activeCount = student.activeLoanBookIds.length;
-              const studentLoans = loans.filter((l) => l.studentId === student.id && l.status === 'active');
+              const studentLoans = loans.filter(
+                (l) => l.studentId === student.id && l.status === 'active'
+              );
 
               return (
                 <div
                   key={student.id}
-                  className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs hover:border-blue-300 transition-all space-y-4"
+                  className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs hover:border-blue-300 transition-all space-y-4"
                 >
                   <div className="flex items-start space-x-3.5">
                     <img
@@ -561,12 +1194,12 @@ export const ManagerDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-xs space-y-1.5">
-                    <span className="font-bold text-slate-700 block text-[11px] uppercase">
+                  <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200 text-xs space-y-1.5">
+                    <span className="font-bold text-slate-700 block text-[10px] uppercase">
                       Exemplaires actuellement en cours d'emprunt :
                     </span>
                     {studentLoans.length === 0 ? (
-                      <span className="text-slate-400 italic">Aucun livre emprunté pour le moment.</span>
+                      <span className="text-slate-400 italic">Aucun livre emprunté actuellement.</span>
                     ) : (
                       studentLoans.map((l) => (
                         <div key={l.id} className="flex items-center justify-between text-slate-800">
@@ -597,48 +1230,413 @@ export const ManagerDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* MODAL QR CODE DE CARTE ÉTUDIANT */}
-      {selectedStudentProfile && (
-        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-slate-200 shadow-2xl relative">
+      {/* ========================================================================= */}
+      {/* MODAL AJOUT / ÉDITION D'OUVRAGE                                           */}
+      {/* ========================================================================= */}
+      {(showAddBookModal || editingBook) && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 border border-slate-200 shadow-2xl relative my-8 animate-in fade-in zoom-in-95">
             <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center space-x-3">
-                <img
-                  src={selectedStudentProfile.avatar}
-                  alt={selectedStudentProfile.name}
-                  className="w-12 h-12 rounded-2xl object-cover ring-2 ring-blue-500/20"
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-lg">
+                  {editingBook ? "Modifier l'ouvrage" : "Ajouter un nouvel ouvrage"}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {editingBook
+                    ? "Mise à jour des informations et du nombre d'exemplaires."
+                    : "Enregistrement d'un nouveau titre au catalogue de l'EST."}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowAddBookModal(false);
+                  setEditingBook(null);
+                }}
+                className="p-1.5 text-slate-400 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBook} className="space-y-3.5 text-xs">
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 block">Titre de l'ouvrage</label>
+                <input
+                  type="text"
+                  required
+                  value={bookForm.title}
+                  onChange={(e) => setBookForm({ ...bookForm, title: e.target.value })}
+                  placeholder="Ex: Analyse Numérique et Algorithmique"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
                 />
-                <div>
-                  <h4 className="font-extrabold text-slate-900 text-base">{selectedStudentProfile.name}</h4>
-                  <span className="text-xs text-slate-500 font-mono block">{selectedStudentProfile.email}</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">Auteur(s)</label>
+                  <input
+                    type="text"
+                    required
+                    value={bookForm.author}
+                    onChange={(e) => setBookForm({ ...bookForm, author: e.target.value })}
+                    placeholder="Ex: Pr. Mohamed Tazi"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">Catégorie</label>
+                  <select
+                    value={bookForm.category}
+                    onChange={(e) => setBookForm({ ...bookForm, category: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  >
+                    {categories.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">Année</label>
+                  <input
+                    type="number"
+                    value={bookForm.publishedYear}
+                    onChange={(e) => setBookForm({ ...bookForm, publishedYear: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">Éditeur</label>
+                  <input
+                    type="text"
+                    value={bookForm.publisher}
+                    onChange={(e) => setBookForm({ ...bookForm, publisher: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">Nombre d'exemplaires</label>
+                  <input
+                    type="number"
+                    min={editingBook ? editingBook.borrowedCopies : 1}
+                    value={bookForm.totalCopies}
+                    onChange={(e) => setBookForm({ ...bookForm, totalCopies: Number(e.target.value) })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">ISBN</label>
+                  <input
+                    type="text"
+                    value={bookForm.isbn}
+                    onChange={(e) => setBookForm({ ...bookForm, isbn: e.target.value })}
+                    placeholder="978-2-10-083456-7"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700 block">Cote de Rayon</label>
+                  <input
+                    type="text"
+                    value={bookForm.shelfLocation}
+                    onChange={(e) => setBookForm({ ...bookForm, shelfLocation: e.target.value })}
+                    placeholder="Rayon B-2"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 block">Résumé succinct</label>
+                <textarea
+                  rows={2}
+                  value={bookForm.description}
+                  onChange={(e) => setBookForm({ ...bookForm, description: e.target.value })}
+                  placeholder="Présentation générale du contenu..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              {/* Bouton pour ajouter une nouvelle catégorie si nécessaire */}
+              <div className="pt-1">
+                {!showAddCategoryInput ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCategoryInput(true)}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold"
+                  >
+                    + Créer une nouvelle catégorie
+                  </button>
+                ) : (
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="text"
+                      placeholder="Nom catégorie..."
+                      value={customCategoryInput}
+                      onChange={(e) => setCustomCategoryInput(e.target.value)}
+                      className="px-2.5 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (customCategoryInput.trim()) {
+                          addCategory(customCategoryInput.trim());
+                          setBookForm({ ...bookForm, category: customCategoryInput.trim() });
+                          setCustomCategoryInput('');
+                          setShowAddCategoryInput(false);
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold"
+                    >
+                      Ajouter
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddBookModal(false);
+                    setEditingBook(null);
+                  }}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-xs cursor-pointer"
+                >
+                  {editingBook ? "Enregistrer modifications" : "Ajouter au stock"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL DE RÉCEPTION PHYSIQUE DE RETOUR (Vérification de l'état)            */}
+      {/* ========================================================================= */}
+      {returnModalLoan && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-slate-200 shadow-2xl relative animate-in fade-in">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="font-extrabold text-slate-900 text-base">
+                  Réception physique d'un exemplaire
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Contrôlez l'état de l'ouvrage avant réintégration au stock.
+                </p>
+              </div>
               <button
-                onClick={() => setSelectedStudentProfile(null)}
-                className="text-xs text-slate-400 hover:text-slate-700 p-1.5 rounded-lg"
+                onClick={() => setReturnModalLoan(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-700"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col items-center text-center">
-              <div className="bg-white p-3 rounded-xl border border-slate-200">
-                <span className="font-mono text-xs font-bold text-slate-800 block mb-2">
-                  Code Carte : {selectedStudentProfile.studentCardId}
-                </span>
-                <div className="text-xs text-slate-500">
-                  Prêts actifs : {selectedStudentProfile.activeLoanBookIds.length} / 3 maximum
-                </div>
-              </div>
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 text-xs space-y-1 mb-4">
+              <span className="font-bold text-slate-900 block">« {returnModalLoan.bookTitle} »</span>
+              <span className="text-slate-500 block">Étudiant : {returnModalLoan.studentName} ({returnModalLoan.studentEmail})</span>
+              <span className="text-[11px] text-slate-400 font-mono block">Cote : {returnModalLoan.bookShelf}</span>
             </div>
 
-            <div className="mt-4 flex justify-end">
-              <button
-                onClick={() => setSelectedStudentProfile(null)}
-                className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold cursor-pointer"
-              >
-                Fermer
-              </button>
+            <div className="space-y-3 text-xs">
+              <label className="font-bold text-slate-700 block">
+                État physique de l'exemplaire restitué :
+              </label>
+
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setReturnCondition('good')}
+                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                    returnCondition === 'good'
+                      ? 'bg-emerald-50 border-emerald-500 text-emerald-950 font-bold ring-2 ring-emerald-500/20'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <CheckCircle2 className="w-4 h-4 mx-auto mb-1 text-emerald-600" />
+                  <span>Bon état</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setReturnCondition('damaged')}
+                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                    returnCondition === 'damaged'
+                      ? 'bg-orange-50 border-orange-500 text-orange-950 font-bold ring-2 ring-orange-500/20'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4 mx-auto mb-1 text-orange-600" />
+                  <span>Endommagé</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setReturnCondition('lost')}
+                  className={`p-3 rounded-xl border text-center transition-all cursor-pointer ${
+                    returnCondition === 'lost'
+                      ? 'bg-rose-50 border-rose-500 text-rose-950 font-bold ring-2 ring-rose-500/20'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <AlertOctagon className="w-4 h-4 mx-auto mb-1 text-rose-600" />
+                  <span>Perdu</span>
+                </button>
+              </div>
+
+              {returnCondition === 'damaged' && (
+                <div className="p-2.5 bg-orange-50 border border-orange-200 rounded-xl text-[11px] text-orange-900">
+                  Forfait institutionnel de réparation : <strong>{penaltyRule.damagedBookFeeMad} MAD</strong>.
+                </div>
+              )}
+
+              {returnCondition === 'lost' && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-900">
+                  Forfait institutionnel de remplacement : <strong>{penaltyRule.lostBookFeeMad} MAD</strong>.
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700 block">Observations ou notes :</label>
+                <input
+                  type="text"
+                  value={returnNotes}
+                  onChange={(e) => setReturnNotes(e.target.value)}
+                  placeholder="Ex: Page de garde déchirée ou retour conforme..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                />
+              </div>
+
+              <div className="mt-5 pt-3 border-t border-slate-100 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setReturnModalLoan(null)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmReturn}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold shadow-xs cursor-pointer"
+                >
+                  Confirmer la restitution
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL REFUS D'UNE DEMANDE D'EMPRUNT                                       */}
+      {/* ========================================================================= */}
+      {refusalModalLoan && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-slate-200 shadow-2xl relative">
+            <h3 className="font-extrabold text-slate-900 text-base mb-1">
+              Refuser la demande d'emprunt
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Veuillez préciser le motif qui sera communiqué à l'étudiant {refusalModalLoan.studentName}.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <textarea
+                rows={3}
+                value={refusalReason}
+                onChange={(e) => setRefusalReason(e.target.value)}
+                placeholder="Motif du refus..."
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl"
+              />
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setRefusalModalLoan(null)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    refuseLoanRequest(refusalModalLoan.id, refusalReason);
+                    setRefusalModalLoan(null);
+                  }}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-bold cursor-pointer"
+                >
+                  Confirmer le refus
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL SIGNALEMENT ADMINISTRATEUR                                          */}
+      {/* ========================================================================= */}
+      {reportModalLoan && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-slate-200 shadow-2xl relative">
+            <div className="flex items-center space-x-2 text-rose-600 mb-2">
+              <ShieldAlert className="w-5 h-5" />
+              <h3 className="font-extrabold text-slate-900 text-base">
+                Signaler ce retard à l'administration
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              Un rapport officiel sera transmis à la scolarité concernant l'étudiant {reportModalLoan.studentName} pour l'ouvrage « {reportModalLoan.bookTitle} ».
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <textarea
+                rows={3}
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                placeholder="Motif du signalement..."
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl"
+              />
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setReportModalLoan(null)}
+                  className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl font-bold cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    reportOverdueToAdmin(reportModalLoan.id, reportReason);
+                    setReportModalLoan(null);
+                  }}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold cursor-pointer"
+                >
+                  Transmettre le rapport
+                </button>
+              </div>
             </div>
           </div>
         </div>

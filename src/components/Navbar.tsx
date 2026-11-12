@@ -1,17 +1,34 @@
 import React, { useState } from 'react';
 import { useLibrary } from '../context/LibraryContext';
-import { BookOpen, LogOut, School, Share2, Check, Copy, ExternalLink, QrCode, X } from 'lucide-react';
+import {
+  LogOut,
+  School,
+  Share2,
+  Check,
+  Copy,
+  X,
+  Bell,
+  BookOpen,
+  Calendar,
+  AlertCircle,
+  CheckCheck,
+} from 'lucide-react';
 import { QRCodeView } from './QRCodeView';
 
 export const Navbar: React.FC = () => {
-  const { currentUser, logout } = useLibrary();
+  const { currentUser, logout, notifications, markNotificationAsRead } = useLibrary();
   const [showShareModal, setShowShareModal] = useState(false);
+  const [showNotifModal, setShowNotifModal] = useState(false);
   const [copied, setCopied] = useState(false);
 
   if (!currentUser) return null;
 
   const isManager = currentUser.role === 'manager';
   const shareUrl = window.location.origin;
+
+  // Filtrer les notifications pour l'utilisateur connecté
+  const userNotifications = notifications.filter((n) => n.userId === currentUser.id);
+  const unreadCount = userNotifications.filter((n) => !n.read).length;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(shareUrl).then(() => {
@@ -38,13 +55,29 @@ export const Navbar: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 hidden sm:block">
-                  {isManager ? "Espace Gestionnaire de Bibliothèque" : "Espace Consultation Étudiant"}
+                  {isManager ? "Espace Gérant de bibliothèque" : "Espace Consultation Étudiant"}
                 </p>
               </div>
             </div>
 
             {/* Navigation & User status */}
-            <div className="flex items-center space-x-2 sm:space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-3">
+              {/* Notification button (particulièrement pour l'étudiant) */}
+              {!isManager && (
+                <button
+                  onClick={() => setShowNotifModal(true)}
+                  className="relative p-2 rounded-xl text-slate-600 hover:text-blue-700 hover:bg-blue-50 transition-colors cursor-pointer"
+                  title="Mes Notifications"
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
+                      {unreadCount}
+                    </span>
+                  )}
+                </button>
+              )}
+
               {/* Bouton Partager */}
               <button
                 onClick={() => setShowShareModal(true)}
@@ -55,7 +88,7 @@ export const Navbar: React.FC = () => {
                 <span className="hidden sm:inline">Partager</span>
               </button>
 
-              {/* User Profile Pill */}
+              {/* User Profile Pill - Strict label "Gérant de bibliothèque" */}
               <div className="flex items-center space-x-2.5 bg-slate-50 border border-slate-200 py-1.5 px-3 rounded-full text-xs">
                 <img
                   src={currentUser.avatar}
@@ -71,20 +104,20 @@ export const Navbar: React.FC = () => {
                   </span>
                 </div>
                 <span
-                  className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                  className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-full ${
                     isManager
-                      ? 'bg-indigo-100 text-indigo-800'
-                      : 'bg-blue-100 text-blue-800'
+                      ? 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                      : 'bg-blue-100 text-blue-800 border border-blue-200'
                   }`}
                 >
-                  {isManager ? 'Gérant' : 'Étudiant'}
+                  {isManager ? 'Gérant de bibliothèque' : 'Étudiant'}
                 </span>
               </div>
 
               {/* Logout button */}
               <button
                 onClick={logout}
-                title="Changer de session / Déconnexion"
+                title="Déconnexion"
                 className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
               >
                 <LogOut className="w-4 h-4" />
@@ -93,6 +126,70 @@ export const Navbar: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {/* MODAL DES NOTIFICATIONS ÉTUDIANT */}
+      {showNotifModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 border border-slate-200 shadow-2xl relative animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+                  <Bell className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-base">
+                    Mes Notifications ({userNotifications.length})
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Mises à jour sur vos demandes et retours d'exemplaires.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowNotifModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+              {userNotifications.length === 0 ? (
+                <div className="text-center py-8 text-xs text-slate-400">
+                  Aucune notification pour le moment.
+                </div>
+              ) : (
+                userNotifications.map((notif) => (
+                  <div
+                    key={notif.id}
+                    onClick={() => markNotificationAsRead(notif.id)}
+                    className={`p-3 rounded-2xl border text-xs transition-all cursor-pointer ${
+                      notif.read
+                        ? 'bg-slate-50/60 border-slate-200 text-slate-600'
+                        : 'bg-blue-50/60 border-blue-300 text-blue-950 font-medium'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-bold text-slate-900">{notif.title}</span>
+                      <span className="text-[10px] text-slate-400">{notif.createdAt}</span>
+                    </div>
+                    <p className="text-xs text-slate-600 leading-relaxed">{notif.message}</p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-5 pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setShowNotifModal(false)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL DE PARTAGE */}
       {showShareModal && (
