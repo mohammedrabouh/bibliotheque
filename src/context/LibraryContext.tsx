@@ -71,12 +71,9 @@ export interface LibraryContextType {
   reservedLoans: Loan[];
   activeLoans: Loan[];
 
-  // Gestion des livres et du stock (Gérant de bibliothèque)
+  // Gestion des livres et du catalogue (Gérant de bibliothèque : consultation et ajout uniquement)
   addBook: (newBook: Omit<Book, 'id' | 'availableCopies' | 'reservedCopies' | 'borrowedCopies' | 'unavailableCopies'>) => void;
-  updateBook: (id: string, updatedFields: Partial<Book>) => void;
-  deleteOrArchiveBook: (id: string) => void;
   addCategory: (categoryName: string) => void;
-  repairDamagedBook: (bookId: string) => void; // Remettre un exemplaire réparé en rayon disponible
 
   // Système de réservation directe (Étudiant & Gérant)
   reserveBook: (bookId: string) => { success: boolean; error?: string };
@@ -433,51 +430,6 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setBooks((prev) => [newBook, ...prev]);
   };
 
-  const updateBook = (id: string, updatedFields: Partial<Book>) => {
-    setBooks((prev) =>
-      prev.map((b) => {
-        if (b.id !== id) return b;
-        const total = updatedFields.totalCopies !== undefined ? updatedFields.totalCopies : b.totalCopies;
-        const activeLoansForBook = loans.filter((l) => l.bookId === id && l.status === 'active').length;
-        const reservedLoansForBook = loans.filter((l) => l.bookId === id && l.status === 'reserved').length;
-        const unavailable = updatedFields.unavailableCopies !== undefined ? updatedFields.unavailableCopies : (b.unavailableCopies || 0);
-
-        const available = Math.max(0, total - activeLoansForBook - reservedLoansForBook - unavailable);
-
-        return {
-          ...b,
-          ...updatedFields,
-          totalCopies: total,
-          borrowedCopies: activeLoansForBook,
-          reservedCopies: reservedLoansForBook,
-          unavailableCopies: unavailable,
-          availableCopies: available,
-        };
-      })
-    );
-  };
-
-  const repairDamagedBook = (bookId: string) => {
-    setBooks((prev) =>
-      prev.map((b) => {
-        if (b.id !== bookId) return b;
-        const curUnavailable = b.unavailableCopies || 0;
-        if (curUnavailable <= 0) return b;
-
-        return {
-          ...b,
-          unavailableCopies: curUnavailable - 1,
-          availableCopies: b.availableCopies + 1,
-        };
-      })
-    );
-  };
-
-  const deleteOrArchiveBook = (id: string) => {
-    setBooks((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, isArchived: true } : b))
-    );
-  };
 
   const addCategory = (categoryName: string) => {
     const trimmed = categoryName.trim();
@@ -1096,10 +1048,7 @@ export const LibraryProvider: React.FC<{ children: React.ReactNode }> = ({ child
         reservedLoans,
         activeLoans,
         addBook,
-        updateBook,
-        deleteOrArchiveBook,
         addCategory,
-        repairDamagedBook,
         reserveBook,
         cancelReservation,
         confirmPhysicalHandover,

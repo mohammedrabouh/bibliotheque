@@ -32,7 +32,6 @@ export const StudentPortal: React.FC = () => {
     systemDate,
     selectedBookForDetail,
     setSelectedBookForDetail,
-    reserveBook,
     cancelReservation,
   } = useLibrary();
 
@@ -87,24 +86,6 @@ export const StudentPortal: React.FC = () => {
       return matchesSearch && matchesAvailability && matchesCategory;
     });
 
-  const handleReserve = (bookId: string) => {
-    setReservationFeedback(null);
-    const res = reserveBook(bookId);
-    if (res.success) {
-      setReservationFeedback({
-        type: 'success',
-        message:
-          "Réservation enregistrée avec succès ! Un exemplaire vous est immédiatement réservé au comptoir. Rendez-vous à la bibliothèque pour le récupérer.",
-      });
-      setTimeout(() => setReservationFeedback(null), 6000);
-    } else {
-      setReservationFeedback({
-        type: 'error',
-        message: res.error || "Impossible de réserver cet ouvrage.",
-      });
-      setTimeout(() => setReservationFeedback(null), 6000);
-    }
-  };
 
   const handleCancelReservation = (loanId: string) => {
     const res = cancelReservation(loanId);
@@ -158,7 +139,7 @@ export const StudentPortal: React.FC = () => {
             Catalogue des Ouvrages & Mes Emprunts
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Consultez les ouvrages en rayon, réservez directement un livre disponible et suivez vos retraits et restitutions.
+            Consultez le catalogue des ouvrages disponibles en rayon et suivez vos emprunts et restitutions.
           </p>
         </div>
 
@@ -218,11 +199,11 @@ export const StudentPortal: React.FC = () => {
         </button>
       </div>
 
-      {/* Bannière explicative : réservation directe et retrait physique */}
+      {/* Bannière explicative : consultation du catalogue et emprunt au comptoir */}
       <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-4 text-xs text-blue-950 flex items-start space-x-3 shadow-2xs">
         <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
         <div className="leading-relaxed">
-          <strong>Fonctionnement des réservations :</strong> Réservez directement tout ouvrage disponible en rayon d'un simple clic. L'exemplaire est réservé pour vous au comptoir. Présentez-vous ensuite à la bibliothèque avec votre carte d'étudiant pour la <strong>remise physique du livre</strong>. L'emprunt effectif démarre uniquement lorsque le gérant vous remet l'ouvrage. Limite maximale : <strong>3 ouvrages</strong> simultanés par étudiant.
+          <strong>Consultation du catalogue :</strong> Consultez librement les ouvrages, leur disponibilité et le nombre d'exemplaires en rayon. Pour emprunter un ouvrage disponible, présentez-vous directement au comptoir de la bibliothèque avec votre carte d'étudiant auprès du gérant. Limite maximale : <strong>3 ouvrages</strong> simultanés par étudiant.
         </div>
       </div>
 
@@ -285,7 +266,7 @@ export const StudentPortal: React.FC = () => {
               {filteredBooks.length} ouvrage{filteredBooks.length > 1 ? 's' : ''} au catalogue
             </span>
             <span className="italic">
-              Cliquez sur un ouvrage pour le consulter et réserver
+              Cliquez sur un ouvrage pour consulter ses informations détaillées
             </span>
           </div>
 
@@ -349,23 +330,18 @@ export const StudentPortal: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Disponibilité & badge */}
-                      <div className="flex items-center space-x-3 shrink-0 ml-3">
-                        {alreadyReserved ? (
-                          <span className="inline-flex items-center space-x-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 px-3 py-1 rounded-full">
-                            <Clock className="w-3.5 h-3.5 text-blue-600" />
-                            <span className="hidden sm:inline">Réservé / Emprunté par vous</span>
-                          </span>
-                        ) : isAvailable ? (
+                      {/* Disponibilité & nombre d'exemplaires disponibles */}
+                      <div className="flex items-center space-x-2.5 shrink-0 ml-3">
+                        {isAvailable ? (
                           <span className="inline-flex items-center space-x-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
                             <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
                             <span className="hidden sm:inline">Disponible</span>
-                            <span>({book.availableCopies}/{book.totalCopies})</span>
+                            <span>({book.availableCopies} exemplaire{book.availableCopies > 1 ? 's' : ''})</span>
                           </span>
                         ) : (
                           <span className="inline-flex items-center space-x-1.5 text-xs font-bold text-rose-700 bg-rose-50 border border-rose-200 px-3 py-1 rounded-full">
                             <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                            <span>Indisponible</span>
+                            <span>Indisponible (0/{book.totalCopies})</span>
                           </span>
                         )}
 
@@ -379,7 +355,7 @@ export const StudentPortal: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* CONTENU EXPANSÉ */}
+                    {/* CONTENU EXPANSÉ (CONSULTATION UNIQUEMENT) */}
                     {isExpanded && (
                       <div className="px-5 pb-5 pt-3 border-t border-slate-100 bg-slate-50/80 text-xs text-slate-600 space-y-4">
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
@@ -393,8 +369,8 @@ export const StudentPortal: React.FC = () => {
                           </div>
                           <div className="bg-white p-3 rounded-xl border border-slate-200">
                             <span className="text-slate-400 text-[10px] font-bold uppercase block">Disponibilité</span>
-                            <span className="font-bold text-slate-900">
-                              {book.availableCopies} en rayon / {book.totalCopies} total
+                            <span className={`font-bold ${isAvailable ? 'text-emerald-700' : 'text-rose-700'}`}>
+                              {isAvailable ? 'Disponible' : 'Indisponible'} • {book.availableCopies} / {book.totalCopies} exemplaire{book.totalCopies > 1 ? 's' : ''}
                             </span>
                           </div>
                           <div className="bg-white p-3 rounded-xl border border-slate-200">
@@ -411,33 +387,11 @@ export const StudentPortal: React.FC = () => {
                         </p>
 
                         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-200">
-                          {/* Bouton de réservation directe */}
-                          <div className="flex items-center space-x-2">
-                            <button
-                              onClick={() => handleReserve(book.id)}
-                              disabled={!isAvailable || alreadyReserved || myActiveOrReservedCount >= 3}
-                              className={`inline-flex items-center space-x-1.5 px-4 py-2 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer ${
-                                alreadyReserved
-                                  ? 'bg-blue-100 text-blue-800 border border-blue-200 cursor-not-allowed opacity-80'
-                                  : !isAvailable
-                                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                                  : myActiveOrReservedCount >= 3
-                                  ? 'bg-amber-100 text-amber-800 border border-amber-300 cursor-not-allowed'
-                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                              }`}
-                            >
-                              <BookmarkCheck className="w-3.5 h-3.5" />
-                              <span>
-                                {alreadyReserved
-                                  ? "Déjà réservé par vous"
-                                  : !isAvailable
-                                  ? "Indisponible"
-                                  : myActiveOrReservedCount >= 3
-                                  ? "Quota de 3 atteint"
-                                  : "Réserver"}
-                              </span>
-                            </button>
-                          </div>
+                          <span className="text-[11px] text-slate-500">
+                            {alreadyReserved
+                              ? "Vous avez actuellement un emprunt ou une réservation enregistrée pour cet ouvrage."
+                              : "Consultation uniquement — Emprunt géré au comptoir par le gérant."}
+                          </span>
 
                           <button
                             onClick={() => setSelectedBookForDetail(book)}
@@ -484,7 +438,7 @@ export const StudentPortal: React.FC = () => {
               <BookmarkCheck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
               <h3 className="text-base font-bold text-slate-800">Aucun emprunt ni réservation</h3>
               <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                Vous n'avez pas de livre réservé ou emprunté. Parcourez le catalogue pour réserver un ouvrage disponible.
+                Vous n'avez pas de livre réservé ou emprunté. Consultez le catalogue pour découvrir les ouvrages disponibles à la bibliothèque.
               </p>
             </div>
           ) : (

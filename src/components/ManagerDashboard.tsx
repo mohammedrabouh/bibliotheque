@@ -713,18 +713,45 @@ export const ManagerDashboard: React.FC = () => {
               />
             </div>
 
-            <select
-              value={selectedBookCategoryFilter}
-              onChange={(e) => setSelectedBookCategoryFilter(e.target.value)}
-              className="bg-slate-50 border border-slate-200 text-xs font-semibold rounded-xl px-3 py-2.5"
-            >
-              <option value="all">Toutes les catégories</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+            <div className="flex items-center space-x-2">
+              <select
+                value={selectedBookCategoryFilter}
+                onChange={(e) => setSelectedBookCategoryFilter(e.target.value)}
+                className="bg-slate-50 border border-slate-200 text-xs font-semibold rounded-xl px-3 py-2.5"
+              >
+                <option value="all">Toutes les catégories</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={() => {
+                  setBookForm({
+                    title: '',
+                    author: '',
+                    category: categories[0] || 'Informatique',
+                    publishedYear: 2024,
+                    publisher: 'Dunod',
+                    isbn: '',
+                    shelfLocation: 'Rayon A-1',
+                    description: '',
+                    summary: 'Présentation générale des principes et méthodes...',
+                    tableOfContents: ['Introduction générale', 'Concepts fondamentaux', 'Études de cas'],
+                    totalCopies: 3,
+                    coverImage: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&auto=format&fit=crop&q=80',
+                    coverColor: 'from-blue-600 to-indigo-800',
+                  });
+                  setShowAddBookModal(true);
+                }}
+                className="inline-flex items-center space-x-1.5 px-3.5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Ajouter un livre</span>
+              </button>
+            </div>
           </div>
 
           {/* Tableau de consultation des ouvrages et stocks */}

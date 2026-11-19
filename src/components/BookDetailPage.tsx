@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Book } from '../types';
-import { useLibrary } from '../context/LibraryContext';
-import { ArrowLeft, BookOpen, MapPin, CheckCircle, AlertCircle, Info, BookmarkCheck, Check } from 'lucide-react';
+import { ArrowLeft, BookOpen, MapPin, CheckCircle, AlertCircle, Info } from 'lucide-react';
 import { QRCodeView } from './QRCodeView';
 
 interface BookDetailPageProps {
@@ -10,35 +9,7 @@ interface BookDetailPageProps {
 }
 
 export const BookDetailPage: React.FC<BookDetailPageProps> = ({ book, onBack }) => {
-  const { reserveBook, currentUser, loans } = useLibrary();
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
   const isAvailable = book.availableCopies > 0;
-  const isStudent = currentUser?.role === 'student';
-
-  const alreadyReserved = loans.some(
-    (l) => l.studentId === currentUser?.id && l.bookId === book.id && (l.status === 'reserved' || l.status === 'active')
-  );
-
-  const myActiveCount = loans.filter(
-    (l) => l.studentId === currentUser?.id && (l.status === 'reserved' || l.status === 'active')
-  ).length;
-
-  const handleReserve = () => {
-    setFeedback(null);
-    const res = reserveBook(book.id);
-    if (res.success) {
-      setFeedback({
-        type: 'success',
-        message: `Exemplaire réservé avec succès ! Rendez-vous au comptoir de la bibliothèque avec votre carte étudiante pour le récupérer.`,
-      });
-    } else {
-      setFeedback({
-        type: 'error',
-        message: res.error || "Impossible de réserver cet ouvrage.",
-      });
-    }
-  };
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
@@ -51,42 +22,16 @@ export const BookDetailPage: React.FC<BookDetailPageProps> = ({ book, onBack }) 
         <span>Retour au catalogue</span>
       </button>
 
-      {/* Message de notification d'action */}
-      {feedback && (
-        <div
-          className={`mb-6 p-4 rounded-2xl shadow-sm border flex items-center justify-between gap-3 ${
-            feedback.type === 'success'
-              ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-              : 'bg-rose-50 border-rose-300 text-rose-900'
-          }`}
-        >
-          <div className="flex items-center space-x-2.5">
-            {feedback.type === 'success' ? (
-              <Check className="w-5 h-5 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-            )}
-            <span className="text-xs sm:text-sm font-bold">{feedback.message}</span>
-          </div>
-          <button
-            onClick={() => setFeedback(null)}
-            className="text-xs text-slate-400 hover:text-slate-700"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Bannière de réservation directe */}
+      {/* Bannière d'information : consultation uniquement */}
       <div className="mb-8 bg-blue-50/80 border border-blue-200 p-4 rounded-2xl shadow-xs">
         <div className="flex items-start space-x-3">
           <Info className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
           <div>
             <h4 className="text-sm font-bold text-blue-950 uppercase tracking-wide">
-              Réservation directe d'un exemplaire
+              Consultation de la fiche ouvrage
             </h4>
             <p className="text-sm text-blue-900 mt-0.5">
-              Si l'ouvrage est disponible, vous pouvez le <strong>réserver directement</strong>. L'exemplaire vous sera immédiatement mis de côté au comptoir. Présentez-vous ensuite à la bibliothèque avec votre carte étudiante pour la remise physique du livre par le gérant.
+              Consultez les informations de l'ouvrage, sa disponibilité et le nombre d'exemplaires en rayon. Pour emprunter un exemplaire disponible, adressez-vous directement au comptoir de la bibliothèque muni de votre carte étudiante.
             </p>
           </div>
         </div>
@@ -154,12 +99,15 @@ export const BookDetailPage: React.FC<BookDetailPageProps> = ({ book, onBack }) 
           </div>
         </div>
 
-        {/* DÉTAILS, SOMMAIRE & ACTION DE RÉSERVATION (Col 6-12) */}
+        {/* DÉTAILS & SOMMAIRE DE L'OUVRAGE (Col 6-12) */}
         <div className="lg:col-span-7 space-y-6">
-          {/* Titre, Auteur & Disponibilité */}
+          {/* Titre, Auteur, Catégorie & Disponibilité */}
           <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
+                <span className="inline-block px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold text-[11px] mb-2">
+                  {book.category}
+                </span>
                 <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 leading-tight">
                   {book.title}
                 </h2>
@@ -173,7 +121,7 @@ export const BookDetailPage: React.FC<BookDetailPageProps> = ({ book, onBack }) 
                 {isAvailable ? (
                   <div className="inline-flex items-center space-x-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 px-3.5 py-1.5 rounded-full text-xs font-semibold">
                     <CheckCircle className="w-4 h-4 text-emerald-600" />
-                    <span>Disponible ({book.availableCopies} sur {book.totalCopies})</span>
+                    <span>Disponible ({book.availableCopies} exemplaire{book.availableCopies > 1 ? 's' : ''} sur {book.totalCopies})</span>
                   </div>
                 ) : (
                   <div className="inline-flex items-center space-x-1.5 bg-rose-50 text-rose-800 border border-rose-200 px-3.5 py-1.5 rounded-full text-xs font-semibold">
@@ -184,48 +132,22 @@ export const BookDetailPage: React.FC<BookDetailPageProps> = ({ book, onBack }) 
               </div>
             </div>
 
-            {/* Bouton de réservation directe pour l'étudiant */}
-            {isStudent && (
-              <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
-                <div>
-                  <span className="text-xs text-slate-500 block">
-                    {alreadyReserved
-                      ? "Vous avez déjà une réservation ou un emprunt pour ce livre"
-                      : isAvailable
-                      ? "Exemplaire prêt à être mis de côté pour vous"
-                      : "Aucun exemplaire libre actuellement"}
-                  </span>
-                </div>
-
-                <button
-                  onClick={handleReserve}
-                  disabled={!isAvailable || alreadyReserved || myActiveCount >= 3}
-                  className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-xl text-xs font-extrabold transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-600 hover:bg-emerald-700 text-white"
-                >
-                  <BookmarkCheck className="w-4 h-4" />
-                  <span>
-                    {alreadyReserved
-                      ? "Déjà réservé"
-                      : !isAvailable
-                      ? "Indisponible"
-                      : myActiveCount >= 3
-                      ? "Quota de 3 atteint"
-                      : "Réserver cet ouvrage"}
-                  </span>
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-6 pt-5 border-t border-slate-100 text-xs text-slate-600">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-5 border-t border-slate-100 text-xs text-slate-600">
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Éditeur</span>
-                <span className="font-semibold text-slate-800">{book.publisher}</span>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Catégorie</span>
+                <span className="font-semibold text-slate-800">{book.category}</span>
               </div>
               <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
-                <span className="text-slate-400 block text-[10px] uppercase font-bold">Année d'édition</span>
-                <span className="font-semibold text-slate-800">{book.publishedYear}</span>
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Exemplaires dispo</span>
+                <span className={`font-bold ${isAvailable ? 'text-emerald-700' : 'text-rose-700'}`}>
+                  {book.availableCopies} / {book.totalCopies}
+                </span>
               </div>
-              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150 col-span-2 sm:col-span-1">
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
+                <span className="text-slate-400 block text-[10px] uppercase font-bold">Éditeur & Année</span>
+                <span className="font-semibold text-slate-800">{book.publisher} ({book.publishedYear})</span>
+              </div>
+              <div className="bg-slate-50 p-2.5 rounded-lg border border-slate-150">
                 <span className="text-slate-400 block text-[10px] uppercase font-bold">Emplacement</span>
                 <span className="font-semibold text-slate-800">{book.shelfLocation}</span>
               </div>
